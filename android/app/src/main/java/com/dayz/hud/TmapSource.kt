@@ -37,7 +37,7 @@ class TmapSource(
             BuildConfig.TMAP_USER_KEY,
             BuildConfig.TMAP_DEVICE_KEY,
         )
-        log("TMAP EDC 초기화 — TMAP 앱이 실행됩니다")
+        log("TMAP 연동 시작")
         TmapEDCSDK.initialize(ctx.applicationContext, auth, work, false)
     }
 

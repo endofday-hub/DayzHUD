@@ -90,8 +90,7 @@ class MainActivity : Activity() {
             ),
             card(
                 "내비 연동",
-                navRow("TMAP", "회전·차로·제한속도·카메라 등 전체",
-                    outlineButton("연동 시작") { HudService.instance?.tmap?.start() ?: log("먼저 HUD 연결") }),
+                navRow("TMAP", "회전·차로·제한속도·카메라 등 전체 (HUD 연결 시 자동 연동)", null),
                 navRow("네이버지도", "Android Auto 연결 중 자동 표시 (회전·거리·속도)", null),
                 navRow("카카오내비", "미지원 — 알림에 회전 정보 없음", null),
                 field("앱 실행 시 자동 실행", segments(NAV_APPS.map { it.first }, prefs.getInt("navApp", 0)) {
@@ -131,11 +130,11 @@ class MainActivity : Activity() {
         if (intent.action == Intent.ACTION_MAIN && HudService.instance == null) withBle(::autoStart)
     }
 
-    // HUD 연결 + 기본 내비 실행. TMAP은 EDC 초기화가 TMAP 앱을 띄우므로 서비스에 맡긴다
+    // HUD 연결 + 기본 내비 실행. TMAP 연동은 서비스가 항상 켜지만 TMAP 화면은 안 띄운다 → 직접 실행
     private fun autoStart() {
         val (name, pkg) = NAV_APPS[prefs.getInt("navApp", 0)]
-        startForegroundService(Intent(this, HudService::class.java).putExtra(HudService.EXTRA_TMAP, pkg == TMAP))
-        if (pkg == null || pkg == TMAP) return
+        startForegroundService(Intent(this, HudService::class.java))
+        if (pkg == null) return
         packageManager.getLaunchIntentForPackage(pkg)?.let(::startActivity) ?: log("$name 미설치")
     }
 
