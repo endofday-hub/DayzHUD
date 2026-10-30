@@ -164,6 +164,7 @@ class MainActivity : Activity() {
             listOfNotNull(
                 Manifest.permission.BLUETOOTH_SCAN,
                 Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.ACCESS_FINE_LOCATION, // GPS 속도
                 // 연결 유지 알림 표시 (Android 13+)
                 if (Build.VERSION.SDK_INT >= 33) Manifest.permission.POST_NOTIFICATIONS else null,
             ).toTypedArray()

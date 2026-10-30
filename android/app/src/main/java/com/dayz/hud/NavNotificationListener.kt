@@ -29,6 +29,7 @@ val TARGETS = setOf(
     "com.skt.tmap.ku",                        // TMAP
     "com.nhn.android.nmap",                   // 네이버 지도
     "com.locnall.KimGiSa",                    // 카카오내비
+    "net.daum.android.map",                   // 카카오맵
     "com.google.android.projection.gearhead", // Android Auto
 )
 const val LOG = "notifications.jsonl"
@@ -39,8 +40,12 @@ fun dumpDir(ctx: Context) = File(ctx.getExternalFilesDir(null), "dump").apply { 
 class NavNotificationListener : NotificationListenerService() {
 
     private val lastByKey = HashMap<String, String>()
+    private var naverKey: String? = null
+    private var lastTbt: Tbt? = null
+    private val unknownIcons = HashSet<String>()
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
+        if (sbn.packageName == NaverMapping.PKG) naver(sbn)
         val n = sbn.notification
         if (sbn.packageName !in TARGETS && (n.flags and Notification.FLAG_ONGOING_EVENT) == 0) return
 
@@ -65,6 +70,33 @@ class NavNotificationListener : NotificationListenerService() {
 
         // ponytail: 메인 스레드 파일 쓰기. 덤프 전용이라 허용, 본 앱에선 제거
         File(dumpDir(this), LOG).appendText(record.put("time", sbn.postTime).toString() + "\n")
+    }
+
+    // 네이버지도 AA 안내 알림 → HUD. 초당 여러 번 같은 내용이 오므로 바뀐 것만 보낸다
+    @Suppress("DEPRECATION")
+    private fun naver(sbn: StatusBarNotification) {
+        val car = sbn.notification.extras.getBundle(NaverMapping.CAR_EXTENSIONS) ?: return
+        val distance = car.getCharSequence("content_title")?.toString() ?: return
+        val icon = (car.getParcelable<Bitmap>("large_bitmap"))?.let { iconHash(png(it)) }
+        if (icon != null && NaverMapping.turnCode(icon) == null && unknownIcons.add(icon)) {
+            HudService.log("네이버 새 회전 아이콘 $icon — NaverMapping.TURN에 추가 필요")
+        }
+        naverKey = sbn.key
+        send(NaverMapping.toTbt(distance, car.getCharSequence("content_text")?.toString().orEmpty(), icon))
+    }
+
+    override fun onNotificationRemoved(sbn: StatusBarNotification) {
+        if (sbn.key != naverKey) return
+        naverKey = null
+        send(TmapMapping.ENDED) // 안내 종료 → HUD 화면 정리
+    }
+
+    private fun send(t: Tbt) {
+        val hud = HudService.instance ?: return
+        val withSpeed = if (t.connected) t.copy(speed = hud.speed) else t
+        if (withSpeed == lastTbt) return
+        lastTbt = withSpeed
+        hud.kivic.sendTbt(withSpeed)
     }
 
     @Suppress("DEPRECATION")
@@ -104,13 +136,18 @@ class NavNotificationListener : NotificationListenerService() {
 
     // 같은 아이콘 = 같은 파일명 → 이 해시가 회전 아이콘 매핑 테이블의 키가 된다
     private fun saveBitmap(b: Bitmap): String {
-        val png = ByteArrayOutputStream().also { b.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
-        val name = MessageDigest.getInstance("SHA-1").digest(png)
-            .joinToString("") { "%02x".format(it) }.take(12) + ".png"
+        val png = png(b)
+        val name = iconHash(png) + ".png"
         val f = File(dumpDir(this), "icons").apply { mkdirs() }.resolve(name)
         if (!f.exists()) f.writeBytes(png)
         return "icon:$name"
     }
+
+    private fun png(b: Bitmap) = ByteArrayOutputStream().also { b.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+
+    // NaverMapping.TURN의 키. 덤프 파일명과 같은 값이어야 한다
+    private fun iconHash(png: ByteArray) =
+        MessageDigest.getInstance("SHA-1").digest(png).joinToString("") { "%02x".format(it) }.take(12)
 
     private fun Drawable.toBitmap(): Bitmap {
         if (this is BitmapDrawable && bitmap != null) return bitmap

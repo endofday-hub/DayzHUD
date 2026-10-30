@@ -18,6 +18,14 @@ class TmapSource(
     private var keysLogged = false
     private var last: Tbt? = null
     private var lastAt = 0L
+    private val main = Handler(Looper.getMainLooper())
+
+    // 안내를 끝내도 TMAP이 onRouteFinished 없이 RGData만 끊는 경우가 있다 (실기기) → HUD에 마지막 화면이 남음.
+    // RGData는 1초마다 오므로 3초 끊기면 종료로 본다 (원본 앱도 TMAP 정보가 없으면 종료 패킷 전송)
+    private val dataTimeout = Runnable {
+        log("TMAP 데이터 끊김 → 안내 종료")
+        emit(TmapMapping.ENDED)
+    }
 
     fun start() {
         if (BuildConfig.TMAP_API_KEY.isEmpty()) return log("android/secrets.properties에 TMAP_API_KEY 없음")
@@ -34,6 +42,7 @@ class TmapSource(
     }
 
     fun stop() {
+        main.removeCallbacks(dataTimeout)
         runCatching {
             TmapEDCSDK.unregisterDataCallback()
             TmapEDCSDK.finish()
@@ -46,6 +55,8 @@ class TmapSource(
     }
 
     private fun emit(t: Tbt) {
+        main.removeCallbacks(dataTimeout)
+        if (t.connected) main.postDelayed(dataTimeout, 3_000)
         // RGData는 주기적으로 온다 → 바뀌었거나 2초 지났을 때만 HUD로
         val now = SystemClock.elapsedRealtime()
         if (t == last && now - lastAt < 2_000) return
@@ -57,7 +68,7 @@ class TmapSource(
     private val work = object : TmapEDCSDK.Companion.EDCWorkListener {
         // bindService 직후 동기 호출 → 아직 서비스 미연결이라 SDK가 등록을 조용히 무시함 (실기기 로그). 1초 뒤 다시 등록
         override fun onInitSuccessEDC() {
-            Handler(Looper.getMainLooper()).postDelayed(::register, 1_000)
+            main.postDelayed(::register, 1_000)
         }
         override fun onHostAppStarted() = register()
         override fun onFinishedEDC() {

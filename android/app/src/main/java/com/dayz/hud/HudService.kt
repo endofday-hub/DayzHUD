@@ -1,15 +1,23 @@
 package com.dayz.hud
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
+import kotlin.math.roundToInt
 
 // HUD 연결과 TMAP 수신을 화면과 분리해 유지한다 (화면 회전·앱 전환·화면 꺼짐에도 끊기지 않게).
 // 화면은 instance로 직접 접근 — 같은 프로세스라 바인더 불필요
@@ -40,12 +48,41 @@ class HudService : Service() {
             .setContentIntent(open)
             .setOngoing(true)
             .build()
-        startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+        // 위치 권한이 없으면 location 타입으로 시작할 수 없다 (Android 14+) → 그때는 속도 없이 연결만
+        val gpsOk = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        startForeground(
+            1, n,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
+                if (gpsOk) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0,
+        )
+        if (gpsOk) {
+            getSystemService(LocationManager::class.java)
+                .requestLocationUpdates(LocationManager.GPS_PROVIDER, 1_000L, 0f, gps, Looper.getMainLooper())
+        } else log("위치 권한 없음 — GPS 속도 미표시")
         kivic.connect()
         return START_STICKY
     }
 
+    // 네이버 알림엔 속도가 없어 폰 GPS 속도를 쓴다. 3초 넘게 신호 없으면(터널 등) 0
+    private var speedKmh = 0
+    private var speedAt = 0L
+    val speed get() = if (SystemClock.elapsedRealtime() - speedAt < 3_000) speedKmh else 0
+
+    // minSdk 29에선 LocationListener 나머지 메서드가 default가 아니라 전부 구현
+    private val gps = object : LocationListener {
+        override fun onLocationChanged(l: Location) {
+            if (!l.hasSpeed()) return
+            speedKmh = (l.speed * 3.6f).roundToInt()
+            speedAt = SystemClock.elapsedRealtime()
+        }
+        override fun onProviderEnabled(provider: String) {}
+        override fun onProviderDisabled(provider: String) {}
+        @Deprecated("API 29")
+        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+    }
+
     override fun onDestroy() {
+        getSystemService(LocationManager::class.java).removeUpdates(gps)
         instance = null
         tmap.stop()
         kivic.close()

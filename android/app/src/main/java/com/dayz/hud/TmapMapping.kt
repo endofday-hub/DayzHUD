@@ -3,7 +3,8 @@ package com.dayz.hud
 // TMAP EDC RGData(Bundle → Map) → Kivic Tbt. 키 이름은 TMAP EDC SDK 문서 기준
 object TmapMapping {
 
-    val ENDED = Tbt(connected = false, naviDisplayStatus = 0)
+    // 원본 앱의 종료 패킷: 새 패킷에 isConnected=false, naviDisplayStatus=0만 설정 → 나머지 전부 0
+    val ENDED = Tbt(connected = false, naviDisplayStatus = 0, naviStatus = 0)
 
     fun toTbt(m: Map<String, Any?>): Tbt {
         val first = m.sub("firstTBTInfo")
