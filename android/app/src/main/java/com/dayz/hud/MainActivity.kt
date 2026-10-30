@@ -97,6 +97,11 @@ class MainActivity : Activity() {
                 navRow("네이버지도", "Android Auto 연결 중 자동 표시 (회전·거리·속도)", null),
                 navRow("카카오내비", "폰 단독 + HUD 모드 화면을 켜 둔 동안 (접근성 권한)",
                     outlineButton("접근성") { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }),
+                // 카카오내비 SDK 시험 (K0): 서울역까지
+                row(
+                    outlineButton("SDK 안내") { kakaoNavi(simul = false) },
+                    outlineButton("SDK 모의주행") { kakaoNavi(simul = true) },
+                ),
                 field("앱 실행 시 자동 실행", segments(NAV_APPS.map { it.first }, prefs.getInt("navApp", 0)) {
                     prefs.edit().putInt("navApp", it).apply()
                 }),
@@ -363,6 +368,9 @@ class MainActivity : Activity() {
     // ── 동작 ──
 
     private fun log(msg: String) = HudService.log(msg)
+
+    private fun kakaoNavi(simul: Boolean) =
+        startActivity(Intent(this, KakaoNaviActivity::class.java).putExtra(KakaoNaviActivity.EXTRA_SIMUL, simul))
 
     private fun sendTbt(t: Tbt) = kivic?.sendTbt(t) ?: log("먼저 HUD 연결")
 

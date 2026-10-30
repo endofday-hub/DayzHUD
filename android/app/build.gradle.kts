@@ -6,7 +6,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-// android/secrets.properties → BuildConfig.TMAP_* (파일 없으면 빈 문자열)
+// android/secrets.properties → BuildConfig.TMAP_*, KAKAO_* (파일 없으면 빈 문자열)
 val secrets = Properties().apply {
     rootProject.file("secrets.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
 }
@@ -22,9 +22,11 @@ android {
         versionCode = 1
         versionName = "0.1"
 
-        for (key in listOf("TMAP_CLIENT_ID", "TMAP_API_KEY", "TMAP_USER_KEY", "TMAP_DEVICE_KEY")) {
+        for (key in listOf("TMAP_CLIENT_ID", "TMAP_API_KEY", "TMAP_USER_KEY", "TMAP_DEVICE_KEY", "KAKAO_APP_KEY")) {
             buildConfigField("String", key, "\"${secrets.getProperty(key, "").trim()}\"")
         }
+        // 카카오내비 SDK 네이티브 라이브러리 (폰은 arm)
+        ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a") }
     }
 
     buildFeatures { buildConfig = true }
@@ -41,5 +43,7 @@ kotlin {
 
 dependencies {
     implementation("com.tmapmobility.tmap:tmap-edc-sdk:1.0.0.0051")
+    implementation("com.kakaomobility.knsdk:knsdk_ui:1.12.7")
+    implementation("androidx.databinding:viewbinding:8.7.3") // KNSDK 화면이 쓰는데 의존성에 없음
     testImplementation("junit:junit:4.13.2")
 }

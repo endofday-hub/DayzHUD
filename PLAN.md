@@ -65,6 +65,61 @@
   - 불안정하면 대안: KNSDK(카카오내비 SDK)로 앱 내 안내 + HUD (개인용 무료 한도 추정, 사용 신청 필요)
 - 네이버 남은 거리·도착 시각·제한속도: AA 화면에만 있음. 접근성 서비스 시험(2026-10-30) → AA 화면은 앱별 비공개 가상 디스플레이(`CarAppService`)라 display 0만 보임 → 불가
 
+### Phase 2-K — 카카오내비 SDK(KNSDK)로 앱 안에서 길안내 → HUD
+화면 읽기(`KakaoHudReader`)는 카카오내비 화면이 켜져 있어야 하고 화살표를 그림으로 판별해 불안정할 수 있다.
+KNSDK는 내비 엔진을 앱에 넣는 방식이라 회전 코드·거리·카메라·차로를 값으로 받는다 (TMAP EDC처럼 정확).
+
+- 조건: 카카오 디벨로퍼스 앱(네이티브 앱 키, 패키지 `com.dayz.hud` + 디버그 키 해시) — `secrets.properties`의 `KAKAO_APP_KEY` (완료 2026-10-30)
+- 비용: 실시간 길안내 무료 일 100,000건(안내 시작 시 1건), 개인·비상업은 별도 신청 없음 (devtalk 담당자 답변)
+- 범위 밖: 상업 이용. Android Auto 출력은 K 단계 뒤 A 단계로 (아래)
+
+| 단계 | 내용 | 완료 기준 |
+|---|---|---|
+| K0 SDK 붙이기 ✅ 2026-10-30 | Maven `devrepo.kakaomobility.com/.../kakao-mobility-android-knsdk-public` + `com.kakaomobility.knsdk:knsdk_ui:1.12.7`, `KNSDK.install` → `initializeWithAppKey`. `KakaoNaviActivity`(SDK가 AndroidX 요구 시 이 화면만 AppCompat)에 `KNNaviView` | 고정 목적지로 경로 탐색·안내 화면 표시, 인증 오류(C302 등) 없음 |
+| K1 안내 → HUD | `KNGuidance` 델리게이트(GuideState/RouteGuide/Location/Safety)를 `KNNaviView`에 넘기면서 값만 가로챔 → `KakaoNaviMapping` → `Tbt` → `kivic.sendTbt`. 종료 시 `ENDED` | 단위 테스트 + HUD에 회전·거리·남은 거리/시간·속도·카메라 표시 |
+| K2 목적지 입력 | 카카오 로컬 키워드 검색(REST 키 별도 필요) → 좌표(WGS84) → KATEC 변환 → `KNPOI`. 최근 목적지 저장 | 앱에서 검색해 바로 안내 시작 |
+| K3 실주행 | 폰 단독 주행, 화면 꺼짐·다른 앱 전환 중에도 안내 유지 확인 (HudService가 프로세스 유지) | 30분 주행 끊김 없음 |
+| K4 선택 | 차로(`KNLane`) → TMAP 차로 비트, 고속도로 정보, 음성 설정. 결과 좋으면 `KakaoHudReader` 제거 | — |
+
+매핑 표 (`KNRGCode` → TMAP TurnType, Kivic이 그리는 코드):
+| KNRGCode | 의미 | TMAP |
+|---|---|---|
+| 0 / 82 / 83 | 직진 / 왼쪽·오른쪽 직진 | 11 |
+| 1 / 2 / 3 | 좌 / 우 / 유턴 | 12 / 13 / 14 |
+| 5 / 6 | 왼쪽 / 오른쪽 도로 | 118 / 117 |
+| 18~29 | 1~12시 방향 | 16~19 중 가까운 것 (8·10·2·4시), 12시=11 |
+| 7~12, 42~49 | 고속·도시고속 진출입·분기 | 왼쪽 계열 118, 오른쪽 계열 117 (K1에서 Kivic 순회로 실측) |
+| 30~41, 70~81 | 회전교차로 n시 | K1에서 Kivic 코드 확인 후 결정 |
+| 100 / 101 / 1000 | 출발 / 도착 / 경유지 | 200 / 201 / (경유지 코드 확인) |
+
+거리: `KNGuide_Location.location.distToLocation(curDirection.location)` (회전까지), 남은 거리·시간은 목적지 위치에 같은 함수(`timeToLocation`).
+속도: `gpsMatched`(KNGPSData) — 없으면 HudService GPS 속도.
+
+K0 실측 (2026-10-30)
+- `androidx.databinding:viewbinding` 직접 추가 필요 (SDK 의존성 누락), `KNNaviView`는 install·초기화 뒤 생성
+- C103 INVALID_TOKEN = 콘솔 네이티브 앱 키에 패키지명·키 해시 누락
+- `convertWGS84ToKATEC(경도, 위도)`, 모의주행 `KNSDK.sharedSimulGuidance()` → `initWithGuidance`로 시작
+- SDK 내장 장소 검색 `KNSDK.reqSearch` 있음 → K2에 REST 키 불필요할 수 있음
+- `KNSDK.makeRendererWithFrame(..., Surface)` 있음 → A3(AA 지도)에 사용
+- APK 약 65MB
+
+리스크
+- SDK 크기(지도·음성 데이터)·AndroidX 의존 → APK 커짐. 수용
+- 모의주행 지원 여부 미확인 → Lockito 시도, 안 되면 실주행만
+- KATEC 좌표 변환 방법(KNSDK 유틸 또는 카카오 좌표 변환 API) K2에서 확인
+
+#### Android Auto 출력 (K1 안정화 후)
+DayzHUD를 Car App Library 내비 앱(`androidx.car.app.category.NAVIGATION`)으로 등록. KNSDK 안내 값을 그대로 쓴다.
+설치: Play 미배포 → 폰 AA 개발자 설정 "알 수 없는 출처" 허용. 시험: DHU (`instrumentcluster = true`로 계기판까지)
+
+| 단계 | 내용 | 완료 기준 |
+|---|---|---|
+| A1 | `NavigationTemplate` 회전 카드(`RoutingInfo`/`Step`/`Maneuver`)·도착 정보(`TravelEstimate`), `NavigationManager.updateTrip` → 차량 계기판·순정 HUD. 지도 자리엔 큰 화살표·거리 직접 그림(`SurfaceCallback` Canvas) | DHU 화면·계기판에 안내 표시 |
+| A2 | 차량 화면에서 목적지 고르기 (최근 목적지 `ListTemplate`, 검색 `SearchTemplate`) | 차에서 안내 시작 |
+| A3 | 카카오 지도를 차량 화면에: AA `Surface` → `VirtualDisplay` + `Presentation`에 `KNMapView` (비공식 우회, OpenGL 렌더링 확인 필요) | 안 되면 A1 화면 유지 |
+
+KNRGCode → AA `Maneuver` 타입 표는 A1에서 (TMAP 표와 같은 방식)
+
 ### Phase 3 — 실사용 안정화
 - [ ] 시동 시 자동 연결, 삼성 배터리 정책 테스트
 - [ ] 안내 종료/앱 종료 시 HUD 화면 정리 (`isConnected=false`)
