@@ -60,6 +60,7 @@ class HudService : Service() {
                 .requestLocationUpdates(LocationManager.GPS_PROVIDER, 1_000L, 0f, gps, Looper.getMainLooper())
         } else log("위치 권한 없음 — GPS 속도 미표시")
         kivic.connect()
+        if (intent?.getBooleanExtra(EXTRA_TMAP, false) == true) tmap.start()
         return START_STICKY
     }
 
@@ -94,6 +95,7 @@ class HudService : Service() {
 
     companion object {
         private const val CHANNEL = "hud"
+        const val EXTRA_TMAP = "tmap" // 시작하면서 TMAP 연동도 (TMAP 앱이 실행됨)
         private val main = Handler(Looper.getMainLooper())
 
         var instance: HudService? = null
