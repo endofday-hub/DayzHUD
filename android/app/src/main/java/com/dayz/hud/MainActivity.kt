@@ -97,10 +97,10 @@ class MainActivity : Activity() {
                 navRow("네이버지도", "Android Auto 연결 중 자동 표시 (회전·거리·속도)", null),
                 navRow("카카오내비", "폰 단독 + HUD 모드 화면을 켜 둔 동안 (접근성 권한)",
                     outlineButton("접근성") { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }),
-                // 카카오내비 SDK 시험 (K0): 서울역까지
+                // 카카오내비 SDK: 목적지 검색 → 앱 안에서 길안내 (모의주행은 시험용)
                 row(
-                    outlineButton("SDK 안내") { kakaoNavi(simul = false) },
-                    outlineButton("SDK 모의주행") { kakaoNavi(simul = true) },
+                    outlineButton("카카오 길안내") { kakaoNavi(simul = false) },
+                    outlineButton("모의주행") { kakaoNavi(simul = true) },
                 ),
                 field("앱 실행 시 자동 실행", segments(NAV_APPS.map { it.first }, prefs.getInt("navApp", 0)) {
                     prefs.edit().putInt("navApp", it).apply()
@@ -440,7 +440,7 @@ class MainActivity : Activity() {
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
 
-    private companion object {
+    internal companion object { // 색은 KakaoNaviActivity 검색 화면도 같이 씀
         val BG = 0xFF121418.toInt()
         val CARD = 0xFF1E2128.toInt()
         val CHIP = 0xFF2A2E37.toInt()

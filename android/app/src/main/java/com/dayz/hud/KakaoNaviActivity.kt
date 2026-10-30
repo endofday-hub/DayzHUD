@@ -1,10 +1,18 @@
 package com.dayz.hud
 
 import android.os.Bundle
+import android.view.KeyEvent
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.kakaomobility.knsdk.KNLanguageType
 import com.kakaomobility.knsdk.KNRoutePriority
 import com.kakaomobility.knsdk.KNSDK
+import com.kakaomobility.knsdk.KNSearchReqType
 import com.kakaomobility.knsdk.common.objects.KNError
 import com.kakaomobility.knsdk.common.objects.KNPOI
 import com.kakaomobility.knsdk.guidance.knguidance.KNGuidance
@@ -31,7 +39,7 @@ import com.kakaomobility.knsdk.ui.view.KNNaviView
 
 // 카카오내비 SDK(KNSDK)로 앱 안에서 길안내 (PLAN.md Phase 2-K).
 // 안내 콜백은 화면(KNNaviView)에 그대로 넘기고, 값은 가로채 HUD로 보낸다 (KakaoNaviMapping).
-// K0: 목적지는 인텐트 좌표(WGS84) 고정, EXTRA_SIMUL이면 모의주행
+// 목적지가 인텐트(EXTRA_X/Y, KATEC)에 없으면 검색 화면부터. EXTRA_SIMUL이면 모의주행
 class KakaoNaviActivity : AppCompatActivity(),
     KNGuidance_GuideStateDelegate, KNGuidance_LocationGuideDelegate, KNGuidance_RouteGuideDelegate,
     KNGuidance_SafetyGuideDelegate, KNGuidance_VoiceGuideDelegate, KNGuidance_CitsGuideDelegate {
@@ -45,10 +53,83 @@ class KakaoNaviActivity : AppCompatActivity(),
         // KNNaviView는 SDK install·초기화 뒤에 만들어야 한다 (먼저 만들면 크래시)
         init { err ->
             if (err != null) return@init fail("초기화", err)
-            naviView = KNNaviView(this)
-            setContentView(naviView)
-            route()
+            val x = intent.getIntExtra(EXTRA_X, 0)
+            if (x != 0) navigate(Place(intent.getStringExtra(EXTRA_NAME).orEmpty(), x, intent.getIntExtra(EXTRA_Y, 0)))
+            else showSearch()
         }
+    }
+
+    // ── 목적지 검색 (SDK 내장 검색, 현재 위치 기준) + 최근 목적지 ──
+
+    private val prefs by lazy { getSharedPreferences("hud", MODE_PRIVATE) }
+    private lateinit var results: LinearLayout
+
+    private fun showSearch() {
+        val input = EditText(this).apply {
+            hint = "목적지 검색 (장소·주소)"
+            setSingleLine()
+            imeOptions = EditorInfo.IME_ACTION_SEARCH
+            setTextColor(MainActivity.TEXT)
+            setHintTextColor(MainActivity.SUB)
+            // 하드웨어 엔터는 누름·뗌 두 번 온다 → 누름만
+            setOnEditorActionListener { v, _, ev ->
+                if (ev == null || ev.action == KeyEvent.ACTION_DOWN) search(v.text.toString())
+                true
+            }
+        }
+        results = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(20), dp(16), dp(32))
+            addView(label(if (simul) "카카오 길안내 (모의주행)" else "카카오 길안내", 22f, MainActivity.TEXT))
+            addView(input)
+            addView(results)
+        }
+        setContentView(ScrollView(this).apply { setBackgroundColor(MainActivity.BG); addView(root) })
+        showPlaces("최근 목적지", Recents.decode(prefs.getString(Recents.KEY, null)))
+        input.requestFocus()
+    }
+
+    private fun search(q: String) {
+        if (q.isBlank()) return
+        val here = KNSDK.sharedGpsManager()?.lastValidGpsData?.pos
+        // 인자 순서: 검색어, 페이지, 페이지 크기, 종류(전체), x, y (SDK 바이트코드로 확인 — 문서 없음)
+        KNSDK.reqSearch(q, 1, 15, KNSearchReqType.KNSearchReqType_1, here?.x?.toInt() ?: 0, here?.y?.toInt() ?: 0) { err, res ->
+            runOnUiThread {
+                if (err != null || res == null) return@runOnUiThread fail("검색", err)
+                val pois = res.placeResult?.poiList.orEmpty() + res.addressResult?.poiList.orEmpty()
+                showPlaces("검색 결과 ${pois.size}건", pois.map { p ->
+                    // 안내용 진입점(건물 입구 등)이 있으면 그쪽으로
+                    val to = p.guidePoints?.firstOrNull()?.pos ?: p.pos
+                    Place(p.name, to.x, to.y, p.rnAddress?.ifEmpty { null } ?: p.address.orEmpty())
+                })
+            }
+        }
+    }
+
+    private fun showPlaces(title: String, places: List<Place>) {
+        results.removeAllViews()
+        results.addView(label("\n$title", 13f, MainActivity.ACCENT))
+        for (p in places) results.addView(label("${p.name}\n${p.address}", 16f, MainActivity.TEXT).apply {
+            setPadding(0, dp(12), 0, dp(12))
+            setOnClickListener {
+                prefs.edit().putString(Recents.KEY, Recents.encode(Recents.add(Recents.decode(prefs.getString(Recents.KEY, null)), p))).apply()
+                navigate(p)
+            }
+        })
+    }
+
+    private fun label(s: String, size: Float, color: Int) = TextView(this).apply { text = s; textSize = size; setTextColor(color) }
+
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+    private val simul get() = intent.getBooleanExtra(EXTRA_SIMUL, false)
+
+    private fun navigate(dest: Place) {
+        currentFocus?.let { getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(it.windowToken, 0) }
+        naviView = KNNaviView(this)
+        setContentView(naviView)
+        route(dest)
     }
 
     private fun init(done: (KNError?) -> Unit) {
@@ -61,14 +142,11 @@ class KakaoNaviActivity : AppCompatActivity(),
         )
     }
 
-    private fun route() {
+    private fun route(to: Place) {
         val here = KNSDK.sharedGpsManager()?.lastValidGpsData?.pos ?: return log("현재 위치 없음 (GPS 대기)")
-        val lon = intent.getDoubleExtra(EXTRA_LON, 126.9707) // 기본: 서울역
-        val lat = intent.getDoubleExtra(EXTRA_LAT, 37.5547)
-        val goal = KNSDK.convertWGS84ToKATEC(lon, lat)
-        log("카카오 경로 탐색: 현재 KATEC(${here.x.toInt()}, ${here.y.toInt()}) → ($lon, $lat) KATEC(${goal.x.toInt()}, ${goal.y.toInt()})")
+        log("카카오 경로 탐색 → ${to.name}")
         val start = KNPOI("현위치", here.x.toInt(), here.y.toInt(), null)
-        val dest = KNPOI(intent.getStringExtra(EXTRA_NAME) ?: "서울역", goal.x.toInt(), goal.y.toInt(), null)
+        val dest = KNPOI(to.name, to.x, to.y, null)
         KNSDK.makeTripWithStart(start, dest, null, null) { err, trip ->
             if (err != null || trip == null) return@makeTripWithStart fail("경로 생성", err)
             trip.routeWithPriority(PRIORITY, 0) { err2, _ ->
@@ -81,7 +159,6 @@ class KakaoNaviActivity : AppCompatActivity(),
     }
 
     private fun start(trip: KNTrip) {
-        val simul = intent.getBooleanExtra(EXTRA_SIMUL, false)
         val g: KNGuidance = (if (simul) KNSDK.sharedSimulGuidance() else KNSDK.sharedGuidance()) ?: return log("안내 객체 없음")
         g.guideStateDelegate = this
         g.locationGuideDelegate = this
@@ -182,8 +259,8 @@ class KakaoNaviActivity : AppCompatActivity(),
     override fun didUpdateCitsGuide(g: KNGuidance, c: KNGuide_Cits) = naviView.didUpdateCitsGuide(g, c)
 
     companion object {
-        const val EXTRA_LON = "lon"
-        const val EXTRA_LAT = "lat"
+        const val EXTRA_X = "x" // KATEC
+        const val EXTRA_Y = "y"
         const val EXTRA_NAME = "name"
         const val EXTRA_SIMUL = "simul"
         private val PRIORITY = KNRoutePriority.KNRoutePriority_Recommand
