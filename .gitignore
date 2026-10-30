@@ -1,0 +1,8 @@
+.gradle/
+build/
+local.properties
+secrets.properties
+.idea/
+*.iml
+.pio/
+hud-dump/
