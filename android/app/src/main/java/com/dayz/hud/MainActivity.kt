@@ -37,6 +37,7 @@ class MainActivity : Activity() {
 
     private lateinit var hudState: TextView
     private lateinit var notiState: TextView
+    private lateinit var kakaoState: TextView
     private lateinit var notiHelp: View
     private lateinit var connectBtn: TextView
     private lateinit var dumpInfo: TextView
@@ -57,6 +58,7 @@ class MainActivity : Activity() {
 
         hudState = text("", 15f, bold = true)
         notiState = text("", 15f, bold = true)
+        kakaoState = text("", 15f, bold = true)
         connectBtn = button("") {
             if (HudService.instance == null) {
                 withBle { startForegroundService(Intent(this, HudService::class.java)) }
@@ -85,6 +87,7 @@ class MainActivity : Activity() {
                 "연결 상태",
                 statusRow("HUD", hudState),
                 statusRow("알림 접근", notiState),
+                statusRow("카카오 화면 읽기", kakaoState),
                 notiHelp,
                 connectBtn.spaced(14),
             ),
@@ -92,7 +95,8 @@ class MainActivity : Activity() {
                 "내비 연동",
                 navRow("TMAP", "회전·차로·제한속도·카메라 등 전체 (HUD 연결 시 자동 연동)", null),
                 navRow("네이버지도", "Android Auto 연결 중 자동 표시 (회전·거리·속도)", null),
-                navRow("카카오내비", "미지원 — 알림에 회전 정보 없음", null),
+                navRow("카카오내비", "폰 단독 + HUD 모드 화면을 켜 둔 동안 (접근성 권한)",
+                    outlineButton("접근성") { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }),
                 field("앱 실행 시 자동 실행", segments(NAV_APPS.map { it.first }, prefs.getInt("navApp", 0)) {
                     prefs.edit().putInt("navApp", it).apply()
                 }),
@@ -172,6 +176,10 @@ class MainActivity : Activity() {
         notiState.text = if (granted) "● 허용됨" else "● 필요"
         notiState.setTextColor(if (granted) OK else BAD)
         notiHelp.visibility = if (granted) View.GONE else View.VISIBLE
+        val reading = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+            ?.contains(ComponentName(this, KakaoHudReader::class.java).flattenToString()) == true
+        kakaoState.text = if (reading) "● 켜짐" else "● 꺼짐"
+        kakaoState.setTextColor(if (reading) OK else SUB)
 
         val dir = dumpDir(this)
         val records = File(dir, LOG).takeIf { it.exists() }?.useLines { it.count() } ?: 0
@@ -437,7 +445,7 @@ class MainActivity : Activity() {
         // HUD 테마 색 (앰버·시안·핑크·옐로·그린) — 버튼 글자색으로 미리 보여 줌
         val THEME_COLORS = listOf(0xFFFFB300, 0xFF00E5FF, 0xFFFF4081, 0xFFFFEB3B, 0xFF69F0AE).map { it.toInt() }
         const val TMAP = "com.skt.tmap.ku"
-        // prefs "navApp" = 이 목록의 순번. 카카오내비는 HUD 표시가 안 돼 뺐다
-        val NAV_APPS = listOf("없음" to null, "TMAP" to TMAP, "네이버지도" to NaverMapping.PKG)
+        // prefs "navApp" = 이 목록의 순번 (뒤에만 추가)
+        val NAV_APPS = listOf("없음" to null, "TMAP" to TMAP, "네이버지도" to NaverMapping.PKG, "카카오내비" to KakaoMapping.PKG)
     }
 }

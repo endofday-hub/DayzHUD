@@ -20,6 +20,7 @@
     <queries>
         <package android:name="com.skt.tmap.ku" />
         <package android:name="com.nhn.android.nmap" />
+        <package android:name="com.locnall.KimGiSa" />
     </queries>
 
     <application
@@ -40,6 +41,19 @@
             android:name=".HudService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice|location" />
+
+        <service
+            android:name=".KakaoHudReader"
+            android:exported="true"
+            android:label="DayzHUD 카카오내비 화면 읽기"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/kakao_reader" />
+        </service>
 
         <service
             android:name=".NavNotificationListener"
