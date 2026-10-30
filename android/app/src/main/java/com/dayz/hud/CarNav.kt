@@ -1,6 +1,7 @@
 package com.dayz.hud
 
 import android.app.Application
+import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -12,15 +13,21 @@ import android.graphics.RectF
 import androidx.car.app.AppManager
 import androidx.car.app.CarAppService
 import androidx.car.app.CarContext
+import androidx.car.app.CarToast
 import androidx.car.app.Screen
 import androidx.car.app.Session
 import androidx.car.app.SurfaceCallback
 import androidx.car.app.SurfaceContainer
+import androidx.car.app.constraints.ConstraintManager
 import androidx.car.app.model.Action
 import androidx.car.app.model.ActionStrip
 import androidx.car.app.model.CarIcon
 import androidx.car.app.model.DateTimeWithZone
 import androidx.car.app.model.Distance
+import androidx.car.app.model.ItemList
+import androidx.car.app.model.ListTemplate
+import androidx.car.app.model.Row
+import androidx.car.app.model.SearchTemplate
 import androidx.car.app.model.Template
 import androidx.car.app.navigation.NavigationManager
 import androidx.car.app.navigation.NavigationManagerCallback
@@ -84,11 +91,13 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
     }
 
     override fun onGetTemplate(): Template {
-        val stop = Action.Builder().setTitle("안내 종료").setOnClickListener { KakaoGuidance.stop() }.build()
-        val b = NavigationTemplate.Builder().setActionStrip(ActionStrip.Builder().addAction(stop).build())
+        val pick = Action.Builder().setTitle("목적지").setOnClickListener { screenManager.push(DestinationScreen(carContext)) }.build()
+        val strip = ActionStrip.Builder().addAction(pick)
         val s = KakaoGuidance.state
+        if (s != null) strip.addAction(Action.Builder().setTitle("안내 종료").setOnClickListener { KakaoGuidance.stop() }.build())
+        val b = NavigationTemplate.Builder().setActionStrip(strip.build())
         if (s == null) {
-            b.setNavigationInfo(MessageInfo.Builder("DayzHUD").setText("폰에서 카카오 길안내를 시작하세요").build())
+            b.setNavigationInfo(MessageInfo.Builder("DayzHUD").setText("'목적지'를 눌러 카카오 길안내를 시작하세요").build())
         } else {
             val info = RoutingInfo.Builder().setCurrentStep(step(s.rg, s.tbt.turnName), distance(s.tbt.turnDistance))
             s.nextRg?.let { info.setNextStep(step(it, "")) }
@@ -317,5 +326,79 @@ object CarManeuver {
         Maneuver.TYPE_TURN_SHARP_LEFT -> -135
         Maneuver.TYPE_TURN_SHARP_RIGHT -> 135
         else -> 0
+    }
+}
+
+// ── 차량 화면에서 목적지 고르기 (A2): 최근 목적지 목록 → 검색 → 누르면 안내 시작 ──
+
+// 차에서 고른 목적지로 안내 시작. 폰 앱을 안 열었으면 HUD 연결 서비스도 같이 띄운다
+private fun startFromCar(ctx: CarContext, sm: androidx.car.app.ScreenManager, p: Place, simul: Boolean) {
+    Recents.remember(ctx.getSharedPreferences("hud", Context.MODE_PRIVATE), p)
+    if (HudService.instance == null) {
+        // ponytail: 백그라운드 FGS 시작이 막히면(Android 12+) 폰에서 앱을 한 번 열어야 HUD 연결됨. 안내 자체는 진행
+        runCatching { ctx.startForegroundService(Intent(ctx, HudService::class.java)) }
+            .onFailure { HudService.log("차에서 HUD 연결 시작 실패: $it") }
+    }
+    KakaoGuidance.init(ctx.applicationContext as Application) { err ->
+        if (err != null) return@init CarToast.makeText(ctx, "카카오 초기화 실패 ${err.code}", CarToast.LENGTH_LONG).show()
+        KakaoGuidance.start(p, simul) { e -> if (e != null) CarToast.makeText(ctx, e, CarToast.LENGTH_LONG).show() }
+    }
+    sm.popToRoot()
+}
+
+private fun placeList(ctx: CarContext, places: List<Place>, empty: String, onPick: (Place) -> Unit): ItemList {
+    val limit = ctx.getCarService(ConstraintManager::class.java).getContentLimit(ConstraintManager.CONTENT_LIMIT_TYPE_LIST)
+    return ItemList.Builder().apply {
+        setNoItemsMessage(empty)
+        for (p in places.take(limit)) addItem(
+            Row.Builder().setTitle(p.name).addText(p.address.ifEmpty { " " }).setOnClickListener { onPick(p) }.build(),
+        )
+    }.build()
+}
+
+class DestinationScreen(ctx: CarContext) : Screen(ctx) {
+    private var simul = false // DHU 시험용
+
+    override fun onGetTemplate(): Template {
+        val prefs = carContext.getSharedPreferences("hud", Context.MODE_PRIVATE)
+        val strip = ActionStrip.Builder()
+            .addAction(Action.Builder().setTitle("검색").setOnClickListener {
+                screenManager.push(SearchScreen(carContext) { simul })
+            }.build())
+            .addAction(Action.Builder().setTitle(if (simul) "모의주행 켜짐" else "모의주행").setOnClickListener {
+                simul = !simul
+                invalidate()
+            }.build())
+            .build()
+        return ListTemplate.Builder()
+            .setTitle("최근 목적지")
+            .setHeaderAction(Action.BACK)
+            .setActionStrip(strip)
+            .setSingleList(placeList(carContext, Recents.load(prefs), "최근 목적지 없음 — '검색'을 누르세요") {
+                startFromCar(carContext, screenManager, it, simul)
+            })
+            .build()
+    }
+}
+
+class SearchScreen(ctx: CarContext, private val simul: () -> Boolean) : Screen(ctx) {
+    private var results: List<Place>? = null
+    private var loading = false
+
+    override fun onGetTemplate(): Template {
+        val b = SearchTemplate.Builder(object : SearchTemplate.SearchCallback {
+            override fun onSearchSubmitted(text: String) {
+                if (text.isBlank()) return
+                loading = true
+                invalidate()
+                KakaoGuidance.init(carContext.applicationContext as Application) { err ->
+                    if (err != null) { loading = false; results = emptyList(); invalidate(); return@init }
+                    KakaoGuidance.search(text) { results = it; loading = false; invalidate() }
+                }
+            }
+        }).setHeaderAction(Action.BACK).setSearchHint("장소·주소").setShowKeyboardByDefault(results == null)
+        if (loading) b.setLoading(true)
+        else results?.let { r -> b.setItemList(placeList(carContext, r, "검색 결과 없음") { startFromCar(carContext, screenManager, it, simul()) }) }
+        return b.build()
     }
 }

@@ -115,11 +115,19 @@ DayzHUD를 Car App Library 내비 앱(`androidx.car.app.category.NAVIGATION`)으
 | 단계 | 내용 | 완료 기준 |
 |---|---|---|
 | A1 ✅ 2026-10-30 | `NavigationTemplate` 회전 카드(`RoutingInfo`/`Step`/`Maneuver`)·도착 정보(`TravelEstimate`), `NavigationManager.updateTrip` → 차량 계기판·순정 HUD. 지도 자리엔 큰 화살표·거리 직접 그림(`SurfaceCallback` Canvas) | DHU 화면·계기판에 안내 표시 |
-| A2 | 차량 화면에서 목적지 고르기 (최근 목적지 `ListTemplate`, 검색 `SearchTemplate`) | 차에서 안내 시작 |
+| A2 (코드 완료 2026-10-30, 실기기 미확인) | 차량 화면 '목적지' → 최근 목적지 `ListTemplate`(모의주행 토글) → '검색' `SearchTemplate` → 누르면 `KakaoGuidance.start` (폰 화면 없이 `startWithTrip`). 최근 목적지는 폰과 공유(`Recents.load/remember`) | 차에서 안내 시작 |
 | A3 ✅ 2026-10-30 | 카카오 지도를 차량 화면에: `KNSDK.makeRendererWithFrame(..., Surface)` (우회 불필요). 경로 `setRoutes`·`cullPassedRoute(loc, false)`, 내 차는 `KNMapMarker`(userLocation은 렌더러에서 안 그려짐, 아래 끝 기준이라 pixelOffset), 위치는 경로 위 `KNLocation.pos` | DHU에서 지도·경로·내 차 확인 |
 
 KNRGCode → AA `Maneuver`: `CarManeuver` (테스트 있음). 안내는 `KakaoGuidance`(화면과 분리)가 들고 폰 화면·HUD·차량 화면이 같이 씀
 - 알려진 제약: 앱 재설치(프로세스 재시작) 뒤엔 기존 AA Surface가 막힘(IllegalArgumentException) → AA 재연결 필요
+- 시험: `bash tools/aa_test.sh [초]` (빌드·설치 → DHU 재시작 → 폰 모의주행 → `$TEMP/dayzhud/dhu_*.png`)
+
+#### 다음에 폰 연결하면 (A2 확인 목록)
+1. `bash tools/aa_test.sh` 로 설치·DHU 재시작 (폰 잠금 해제, AA 헤드 유닛 서버 켜짐)
+2. DHU에서 DayzHUD → '목적지' → 최근 목적지 목록 보이는지, '모의주행' 토글 → 항목 누르면 폰 화면 없이 안내 시작·지도·HUD 전송 되는지
+3. '검색' → 키보드로 검색 → 결과 누르면 안내 시작되는지 (DHU 키보드 입력)
+4. 폰 앱을 안 연 상태(HudService 없음)에서 차로 시작 시 HUD 연결되는지 — 로그 "차에서 HUD 연결 시작 실패"면 Android 12 백그라운드 FGS 제한 → 대안 검토
+5. '안내 종료' 버튼 → 지도·HUD 정리
 
 ### Phase 3 — 실사용 안정화
 - [ ] 시동 시 자동 연결, 삼성 배터리 정책 테스트

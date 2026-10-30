@@ -63,7 +63,7 @@ class KakaoNaviActivity : AppCompatActivity() {
             addView(results)
         }
         setContentView(ScrollView(this).apply { setBackgroundColor(MainActivity.BG); addView(root) })
-        showPlaces("최근 목적지", Recents.decode(prefs.getString(Recents.KEY, null)))
+        showPlaces("최근 목적지", Recents.load(prefs))
         input.requestFocus()
     }
 
@@ -77,7 +77,7 @@ class KakaoNaviActivity : AppCompatActivity() {
         for (p in places) results.addView(label("${p.name}\n${p.address}", 16f, MainActivity.TEXT).apply {
             setPadding(0, dp(12), 0, dp(12))
             setOnClickListener {
-                prefs.edit().putString(Recents.KEY, Recents.encode(Recents.add(Recents.decode(prefs.getString(Recents.KEY, null)), p))).apply()
+                Recents.remember(prefs, p)
                 navigate(p)
             }
         })
