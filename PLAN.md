@@ -114,11 +114,12 @@ DayzHUD를 Car App Library 내비 앱(`androidx.car.app.category.NAVIGATION`)으
 
 | 단계 | 내용 | 완료 기준 |
 |---|---|---|
-| A1 | `NavigationTemplate` 회전 카드(`RoutingInfo`/`Step`/`Maneuver`)·도착 정보(`TravelEstimate`), `NavigationManager.updateTrip` → 차량 계기판·순정 HUD. 지도 자리엔 큰 화살표·거리 직접 그림(`SurfaceCallback` Canvas) | DHU 화면·계기판에 안내 표시 |
+| A1 ✅ 2026-10-30 | `NavigationTemplate` 회전 카드(`RoutingInfo`/`Step`/`Maneuver`)·도착 정보(`TravelEstimate`), `NavigationManager.updateTrip` → 차량 계기판·순정 HUD. 지도 자리엔 큰 화살표·거리 직접 그림(`SurfaceCallback` Canvas) | DHU 화면·계기판에 안내 표시 |
 | A2 | 차량 화면에서 목적지 고르기 (최근 목적지 `ListTemplate`, 검색 `SearchTemplate`) | 차에서 안내 시작 |
-| A3 | 카카오 지도를 차량 화면에: AA `Surface` → `VirtualDisplay` + `Presentation`에 `KNMapView` (비공식 우회, OpenGL 렌더링 확인 필요) | 안 되면 A1 화면 유지 |
+| A3 ✅ 2026-10-30 | 카카오 지도를 차량 화면에: `KNSDK.makeRendererWithFrame(..., Surface)` (우회 불필요). 경로 `setRoutes`·`cullPassedRoute(loc, false)`, 내 차는 `KNMapMarker`(userLocation은 렌더러에서 안 그려짐, 아래 끝 기준이라 pixelOffset), 위치는 경로 위 `KNLocation.pos` | DHU에서 지도·경로·내 차 확인 |
 
-KNRGCode → AA `Maneuver` 타입 표는 A1에서 (TMAP 표와 같은 방식)
+KNRGCode → AA `Maneuver`: `CarManeuver` (테스트 있음). 안내는 `KakaoGuidance`(화면과 분리)가 들고 폰 화면·HUD·차량 화면이 같이 씀
+- 알려진 제약: 앱 재설치(프로세스 재시작) 뒤엔 기존 AA Surface가 막힘(IllegalArgumentException) → AA 재연결 필요
 
 ### Phase 3 — 실사용 안정화
 - [ ] 시동 시 자동 연결, 삼성 배터리 정책 테스트

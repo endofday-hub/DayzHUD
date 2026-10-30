@@ -45,5 +45,6 @@ dependencies {
     implementation("com.tmapmobility.tmap:tmap-edc-sdk:1.0.0.0051")
     implementation("com.kakaomobility.knsdk:knsdk_ui:1.12.7")
     implementation("androidx.databinding:viewbinding:8.7.3") // KNSDK 화면이 쓰는데 의존성에 없음
+    implementation("androidx.car.app:app:1.4.0") // Android Auto (CarNav.kt)
     testImplementation("junit:junit:4.13.2")
 }

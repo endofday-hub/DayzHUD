@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android Auto: Car App Library 템플릿 앱 (CarNav.kt) -->
+<automotiveApp>
+    <uses name="template" />
+</automotiveApp>
