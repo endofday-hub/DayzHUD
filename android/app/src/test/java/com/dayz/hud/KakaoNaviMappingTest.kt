@@ -41,6 +41,27 @@ class KakaoNaviMappingTest {
     }
 
     @Test
+    fun lanesFollowTmapBits() {
+        // 3차로: 좌회전+유턴 / 직진(안내, 권장) / 직진+우회전(우측 버스)
+        val t = KakaoNaviMapping.toTbt(
+            KakaoNaviMapping.Guide(
+                rg = 0, turnDistance = 300, name = "", remainDistance = 1, remainSeconds = 1, speed = 0,
+                lanes = listOf(
+                    KakaoNaviMapping.Lane(turn = 3, pocket = 1),
+                    KakaoNaviMapping.Lane(turn = 8, highlight = 4, suggest = 1),
+                    KakaoNaviMapping.Lane(turn = 40, bus = 2),
+                ),
+                laneDistance = 280,
+            ),
+        )
+        assertEquals(true, t.lane)
+        assertEquals(280, t.laneDistance)
+        assertEquals(listOf(3, 8, 40), t.laneTurnInfo)
+        assertEquals(listOf(1, 0x80, 64), t.laneEtc)
+        assertEquals(listOf(0, 8, 0), t.laneAvailable)
+    }
+
+    @Test
     fun safetyOnlyNearAndKnown() {
         fun safe(s: KakaoNaviMapping.Safety) = KakaoNaviMapping.toTbt(
             KakaoNaviMapping.Guide(rg = 0, turnDistance = 1, name = "", remainDistance = 1, remainSeconds = 1, speed = 0, safety = s),

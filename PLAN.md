@@ -76,7 +76,7 @@ KNSDK는 내비 엔진을 앱에 넣는 방식이라 회전 코드·거리·카�
 | 단계 | 내용 | 완료 기준 |
 |---|---|---|
 | K0 SDK 붙이기 ✅ 2026-10-30 | Maven `devrepo.kakaomobility.com/.../kakao-mobility-android-knsdk-public` + `com.kakaomobility.knsdk:knsdk_ui:1.12.7`, `KNSDK.install` → `initializeWithAppKey`. `KakaoNaviActivity`(SDK가 AndroidX 요구 시 이 화면만 AppCompat)에 `KNNaviView` | 고정 목적지로 경로 탐색·안내 화면 표시, 인증 오류(C302 등) 없음 |
-| K1 안내 → HUD ✅ 2026-10-30 (모의주행으로 HUD 표시 확인, 차로는 K4) | `KNGuidance` 델리게이트(GuideState/RouteGuide/Location/Safety)를 `KNNaviView`에 넘기면서 값만 가로챔 → `KakaoNaviMapping` → `Tbt` → `kivic.sendTbt`. 종료 시 `ENDED` | 단위 테스트 + HUD에 회전·거리·남은 거리/시간·속도·카메라 표시 |
+| K1 안내 → HUD ✅ 2026-10-30 (모의주행으로 HUD 표시 확인, 차로 포함 — KNLane turnType 비트 = TMAP laneTurnInfo. HUD는 안내 지점 근처에서만 차로 표시) | `KNGuidance` 델리게이트(GuideState/RouteGuide/Location/Safety)를 `KNNaviView`에 넘기면서 값만 가로챔 → `KakaoNaviMapping` → `Tbt` → `kivic.sendTbt`. 종료 시 `ENDED` | 단위 테스트 + HUD에 회전·거리·남은 거리/시간·속도·카메라 표시 |
 | K2 목적지 입력 | 카카오 로컬 키워드 검색(REST 키 별도 필요) → 좌표(WGS84) → KATEC 변환 → `KNPOI`. 최근 목적지 저장 | 앱에서 검색해 바로 안내 시작 |
 | K3 실주행 | 폰 단독 주행, 화면 꺼짐·다른 앱 전환 중에도 안내 유지 확인 (HudService가 프로세스 유지) | 30분 주행 끊김 없음 |
 | K4 선택 | 차로(`KNLane`) → TMAP 차로 비트, 고속도로 정보, 음성 설정. 결과 좋으면 `KakaoHudReader` 제거 | — |

@@ -58,6 +58,16 @@ object KakaoNaviMapping {
     // code = KNSafetyCode 이름, sectionSpeed = 구간단속 평균속도 (구간 중일 때)
     class Safety(val code: String, val distance: Int, val speedLimit: Int = 0, val sectionSpeed: Int = 0)
 
+    // KNLane_LaneInfo 그대로 (왼쪽 차로부터). turn 비트는 TMAP laneTurnInfo와 같다: 1 유턴, 2 좌, 4 좌측, 8 직진, 16 우측, 32 우
+    class Lane(
+        val turn: Int,
+        val pocket: Int = 0,    // 1 좌포켓, 2 우포켓
+        val bus: Int = 0,       // 0 아님, 1 중앙, 2 우측 버스전용
+        val facility: Int = 0,  // 1 고가, 2 지하
+        val highlight: Int = 0, // 안내 차로면 0 아님
+        val suggest: Int = 0,   // 1 권장 차로
+    )
+
     class Guide(
         val rg: Int,
         val turnDistance: Int,
@@ -68,7 +78,14 @@ object KakaoNaviMapping {
         val remainSeconds: Int,
         val speed: Int,
         val safety: Safety? = null,
+        val lanes: List<Lane> = emptyList(),
+        val laneDistance: Int = 0,
     )
+
+    // TMAP laneEtcInfo: 1 좌포켓, 2 우포켓, 4 고가, 8 지하, 64 버스, 0x80 권장
+    private fun etc(l: Lane) = (if (l.pocket in 1..2) l.pocket else 0) or
+        (if (l.facility == 1) 4 else 0) or (if (l.facility == 2) 8 else 0) or
+        (if (l.bus != 0) 64 else 0) or (if (l.suggest == 1) 0x80 else 0)
 
     fun toTbt(g: Guide): Tbt {
         val s = g.safety?.takeIf { it.distance in 0..SDI_RANGE }
@@ -90,6 +107,12 @@ object KakaoNaviMapping {
             block = inSection,
             blockDistance = if (inSection) s!!.distance else 0,
             blockSpeed = if (inSection) s!!.sectionSpeed else 0,
+            lane = g.lanes.isNotEmpty(),
+            laneDistance = g.laneDistance,
+            laneTurnInfo = g.lanes.map { it.turn },
+            laneEtc = g.lanes.map(::etc),
+            // TMAP처럼 안내 차로는 그 차로의 턴 정보, 아니면 0
+            laneAvailable = g.lanes.map { if (it.highlight != 0) it.turn else 0 },
         )
     }
 }

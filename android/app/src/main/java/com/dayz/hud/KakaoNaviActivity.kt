@@ -127,6 +127,7 @@ class KakaoNaviActivity : AppCompatActivity(),
         val next = g.routeGuide?.nextDirection
         val trip = g.trip ?: return
         val safety = g.safetyGuide?.safetiesOnGuide?.firstOrNull { !it.passed && KakaoNaviMapping.sdiCode(it.code.name) != null }
+        val lane = g.routeGuide?.lane
         send(KakaoNaviMapping.toTbt(KakaoNaviMapping.Guide(
             rg = dir.rgCode.value,
             turnDistance = here.distToLocation(dir.location),
@@ -144,6 +145,13 @@ class KakaoNaviActivity : AppCompatActivity(),
                     (it as? KNSafety_Section)?.sectionAvrSpeed ?: 0,
                 )
             },
+            lanes = lane?.laneInfos.orEmpty().map {
+                KakaoNaviMapping.Lane(
+                    it.turnType.toInt(), it.pocketType.toInt(), it.busType.toInt(),
+                    it.facilityType.toInt(), it.highlightType.toInt(), it.suggest.toInt(),
+                )
+            },
+            laneDistance = lane?.let { here.distToLocation(it.location) } ?: 0,
         )))
     }
 
