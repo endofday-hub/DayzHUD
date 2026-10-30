@@ -58,7 +58,8 @@ class KivicLink(
     fun sendTbt(t: Tbt) {
         main.post {
             if (!ready) return@post log("HUD 미연결")
-            log("TBT code=${t.turnCode} ${t.turnDistance}m display=${t.naviDisplayStatus} status=${t.naviStatus}")
+            log("TBT code=${t.turnCode} ${t.turnDistance}m display=${t.naviDisplayStatus} status=${t.naviStatus}" +
+                if (t.lane) " lane=${t.laneTurnInfo} etc=${t.laneEtc} ok=${t.laneAvailable} ${t.laneDistance}m" else "")
             send(KivicPacket.tbt(t))
         }
     }

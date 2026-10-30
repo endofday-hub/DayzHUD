@@ -47,7 +47,7 @@
 ### Phase 1 — MVP: TMAP → Kivic
 - [x] EDC SDK 연동 (initialize → registerDataCallback) — 실기기 확인 2026-10-30. 등록은 서비스 연결 후(1초 뒤)·안내 시작 시 다시 해야 함
   - 실제 RGData 키: allHighwayTbtList, approachingGuidePoint, averageSpeed, currentCourseAngle, currentRoadName, currentRoutePlan, destinationLatitude/Longitude/Name, firstTBTInfo, secondTBTInfo, gpsState, hasAlternativeRoute, hasTbtInfo, hipassLaneCount, isCaution, isNightMode, isOnHighway, isRoadHighWay, isShadeArea, laneAvailableInfo, laneBubbleList, laneCount, laneDistance, laneEtcInfo, laneTurnInfo, limitSpeed, matchedLatitude/Longitude, nGoPosDist, nGoPosTime, noLocationSignal, remainDistanceToDestinationInMeter, remainTimeToDestinationInSec, remainViaPointSize, showLane, showSDI, speedInKmPerHour
-- [ ] RGData → TBTTmapData 변환 (TBT 코드·거리·명칭, 속도, SDI→안전운행, 차로)
+- [x] RGData → TBTTmapData 변환 (TBT 코드·거리·명칭, 속도, SDI→안전운행, 차로) — 회전·거리·제한속도·단속카메라·차로 HUD 표시 확인 2026-10-30
 - [x] Foreground Service로 이동: 자동 재연결, KeepAlive (HUD 이벤트마다 응답, 12초 무응답 시 재연결)
 - **완료 기준**: TMAP 안내(폰 단독, AA 연결 중 모두) 시 Kivic HUD에 회전/거리 표시
 

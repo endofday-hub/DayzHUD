@@ -12,8 +12,9 @@ object TmapMapping {
         val speed = m.int("speedInKmPerHour")
         if (!m.bool("hasTbtInfo") && m.int("nGoPosDist") <= 0) return ENDED.copy(speed = speed)
 
-        // naviDisplayStatus/naviStatus는 Tbt 기본값(1/1) — 키빅 실기기 테스트 결과로 확정할 것
-        // ponytail: 차로 안내 미전달, TMAP laneBubbleList ↔ Kivic lane 형식 대응 확인 후 추가
+        // naviDisplayStatus/naviStatus는 Tbt 기본값(1/1)
+        // 차로: TMAP int[] 비트마스크(1 유턴, 2 좌, … / 0x80 권장)를 원본 Kivic 앱처럼 그대로 전달
+        val laneCount = m.int("laneCount")
         return Tbt(
             speed = speed,
             totalDistance = m.int("nGoPosDist"),
@@ -30,7 +31,18 @@ object TmapMapping {
             block = sdi.bool("nSdiBlockSertion"),
             blockDistance = sdi.int("nSdiBlockDist"),
             blockSpeed = sdi.int("nSdiBlockSpeed"),
+            lane = m.bool("showLane") && laneCount > 0,
+            laneDistance = m.int("laneDistance"),
+            laneTurnInfo = m.ints("laneTurnInfo").take(laneCount), // Kivic은 laneCount개만 읽음
+            laneEtc = m.ints("laneEtcInfo"),
+            laneAvailable = m.ints("laneAvailableInfo"),
         )
+    }
+
+    private fun Map<*, *>.ints(k: String): List<Int> = when (val v = this[k]) {
+        is IntArray -> v.toList()
+        is Collection<*> -> v.mapNotNull { (it as? Number)?.toInt() }
+        else -> emptyList()
     }
 
     private fun Map<*, *>.sub(k: String): Map<*, *> = this[k] as? Map<*, *> ?: emptyMap<Any, Any>()

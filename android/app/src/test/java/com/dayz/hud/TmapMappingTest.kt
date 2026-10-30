@@ -38,6 +38,24 @@ class TmapMappingTest {
     }
 
     @Test
+    fun laneInfoPassesThrough() {
+        val t = TmapMapping.toTbt(mapOf(
+            "hasTbtInfo" to true,
+            "showLane" to true,
+            "laneCount" to 3,
+            "laneDistance" to 250,
+            "laneTurnInfo" to intArrayOf(2, 8, 8 or 32, 0), // 남는 값은 laneCount로 자름
+            "laneEtcInfo" to intArrayOf(1),
+            "laneAvailableInfo" to intArrayOf(0, 8, 8),
+        ))
+        assertEquals(true, t.lane)
+        assertEquals(250, t.laneDistance)
+        assertEquals(listOf(2, 8, 40), t.laneTurnInfo)
+        assertEquals(listOf(1), t.laneEtc)
+        assertEquals(listOf(0, 8, 8), t.laneAvailable)
+    }
+
+    @Test
     fun crossNameFallback() {
         val t = TmapMapping.toTbt(mapOf("hasTbtInfo" to true, "firstTBTInfo" to mapOf("szCrossName" to "역삼")))
         assertEquals("역삼", t.turnName)
