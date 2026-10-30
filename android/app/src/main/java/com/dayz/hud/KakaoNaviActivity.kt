@@ -1,7 +1,6 @@
 package com.dayz.hud
 
 import android.os.Bundle
-import android.os.SystemClock
 import androidx.appcompat.app.AppCompatActivity
 import com.kakaomobility.knsdk.KNLanguageType
 import com.kakaomobility.knsdk.KNRoutePriority
@@ -23,20 +22,22 @@ import com.kakaomobility.knsdk.guidance.knguidance.routeguide.KNGuide_Route
 import com.kakaomobility.knsdk.guidance.knguidance.routeguide.objects.KNMultiRouteInfo
 import com.kakaomobility.knsdk.guidance.knguidance.safetyguide.KNGuide_Safety
 import com.kakaomobility.knsdk.guidance.knguidance.safetyguide.objects.KNSafety
+import com.kakaomobility.knsdk.guidance.knguidance.safetyguide.objects.KNSafety_Camera
+import com.kakaomobility.knsdk.guidance.knguidance.safetyguide.objects.KNSafety_Section
 import com.kakaomobility.knsdk.guidance.knguidance.voiceguide.KNGuide_Voice
 import com.kakaomobility.knsdk.trip.kntrip.KNTrip
 import com.kakaomobility.knsdk.trip.kntrip.knroute.KNRoute
 import com.kakaomobility.knsdk.ui.view.KNNaviView
 
 // 카카오내비 SDK(KNSDK)로 앱 안에서 길안내 (PLAN.md Phase 2-K).
-// 안내 콜백은 화면(KNNaviView)에 그대로 넘기고, 값은 가로채 HUD로 보낸다 (K1).
+// 안내 콜백은 화면(KNNaviView)에 그대로 넘기고, 값은 가로채 HUD로 보낸다 (KakaoNaviMapping).
 // K0: 목적지는 인텐트 좌표(WGS84) 고정, EXTRA_SIMUL이면 모의주행
 class KakaoNaviActivity : AppCompatActivity(),
     KNGuidance_GuideStateDelegate, KNGuidance_LocationGuideDelegate, KNGuidance_RouteGuideDelegate,
     KNGuidance_SafetyGuideDelegate, KNGuidance_VoiceGuideDelegate, KNGuidance_CitsGuideDelegate {
 
     private lateinit var naviView: KNNaviView
-    private var loggedAt = 0L
+    private var lastSent: Tbt? = null
     private var lastRoute = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -96,7 +97,7 @@ class KakaoNaviActivity : AppCompatActivity(),
 
     private fun log(msg: String) = HudService.log(msg)
 
-    // ── 안내 콜백: 화면에 넘기고 값 확인 (K1에서 HUD 전송으로) ──
+    // ── 안내 콜백: 화면(KNNaviView)에 그대로 넘기고, 위치 갱신 때 값을 HUD로 ──
 
     override fun guidanceGuideStarted(g: KNGuidance) = naviView.guidanceGuideStarted(g)
     override fun guidanceCheckingRouteChange(g: KNGuidance) = naviView.guidanceCheckingRouteChange(g)
@@ -110,6 +111,7 @@ class KakaoNaviActivity : AppCompatActivity(),
     override fun guidanceGuideEnded(g: KNGuidance) {
         log("카카오 안내 종료")
         naviView.guidanceGuideEnded(g, false)
+        send(TmapMapping.ENDED)
     }
 
     override fun guidanceDidUpdateRoutes(g: KNGuidance, routes: List<KNRoute>, info: KNMultiRouteInfo?) =
@@ -117,15 +119,43 @@ class KakaoNaviActivity : AppCompatActivity(),
 
     override fun guidanceDidUpdateIndoorRoute(g: KNGuidance, route: KNRoute?) = naviView.guidanceDidUpdateIndoorRoute(g, route)
 
+    // 위치는 약 1초마다 온다 → 그때마다 현재 안내 전체를 다시 계산해 HUD로 (같으면 안 보냄)
     override fun guidanceDidUpdateLocation(g: KNGuidance, loc: KNGuide_Location) {
         naviView.guidanceDidUpdateLocation(g, loc)
-        val now = SystemClock.elapsedRealtime()
-        if (now - loggedAt < 5_000) return
-        loggedAt = now
         val here = loc.location ?: return
         val dir = g.routeGuide?.curDirection ?: return
-        val goal = g.routesOnGuide?.firstOrNull()?.let { g.trip?.remainDist() }
-        log("카카오 위치: 회전 ${dir.rgCode} ${here.distToLocation(dir.location)}m, 속도 ${loc.gpsMatched.speed}, 남은 ${goal}m")
+        val next = g.routeGuide?.nextDirection
+        val trip = g.trip ?: return
+        val safety = g.safetyGuide?.safetiesOnGuide?.firstOrNull { !it.passed && KakaoNaviMapping.sdiCode(it.code.name) != null }
+        send(KakaoNaviMapping.toTbt(KakaoNaviMapping.Guide(
+            rg = dir.rgCode.value,
+            turnDistance = here.distToLocation(dir.location),
+            name = dir.directionNames?.firstOrNull() ?: dir.nodeName.orEmpty(),
+            nextRg = next?.rgCode?.value,
+            nextDistance = next?.let { here.distToLocation(it.location) } ?: 0,
+            remainDistance = trip.remainDist(),
+            remainSeconds = trip.remainTime(),
+            speed = loc.gpsMatched.speed,
+            safety = safety?.let {
+                KakaoNaviMapping.Safety(
+                    it.code.name,
+                    here.distToLocation(it.location),
+                    (it as? KNSafety_Camera)?.speedLimit ?: 0,
+                    (it as? KNSafety_Section)?.sectionAvrSpeed ?: 0,
+                )
+            },
+        )))
+    }
+
+    private fun send(t: Tbt) {
+        if (t == lastSent) return
+        lastSent = t
+        HudService.instance?.kivic?.sendTbt(t)
+    }
+
+    override fun onDestroy() {
+        if (lastSent?.connected == true) send(TmapMapping.ENDED) // 안내 화면을 닫으면 HUD 정리
+        super.onDestroy()
     }
 
     override fun guidanceDidUpdateRouteGuide(g: KNGuidance, r: KNGuide_Route) {
