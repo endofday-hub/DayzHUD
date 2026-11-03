@@ -8,7 +8,8 @@
 ```
 [TMAP 앱] ──EDC SDK (RGData 콜백)──┐
                                    ├─▶ [DayzHUD 앱] ──BLE Nordic UART──▶ [Kivic SM HUD]
-[네이버 지도 / 카카오내비] ──알림──┘     NavState → TBTTmapData 패킷       (아이콘·숫자는 HUD가 직접 그림)
+[네이버 지도] ──알림──────────────┤     NavState → TBTTmapData 패킷       (아이콘·숫자는 HUD가 직접 그림)
+[카카오내비 SDK (앱 안 길안내)] ────┘     + Android Auto 차량 화면 (카카오 지도)
 ```
 
 - HUD 프로토콜: `docs/kivic-protocol.md` (원본 앱 APK 분석 결과)
@@ -20,7 +21,7 @@
 |---|---|---|
 | **TMAP** | **EDC SDK** (`com.tmapmobility.tmap:tmap-edc-sdk`) — TMAP 앱의 실시간 RGData(TBT 회전코드·거리·속도·SDI·차로) 수신 | TMAP 회전코드 = Kivic `curTbtCode` 체계 → 거의 그대로 전달 |
 | 네이버 지도 | 알림 파싱 | 공개 SDK는 지도 표시용, 길안내 연동 없음 |
-| 카카오내비 | 알림 파싱 | KNSDK는 자체 내비 엔진(앱 안에서 주행해야 함, AA 불가) → 보류 |
+| 카카오내비 | **KNSDK** 앱 안 길안내 (Phase 2-K) + AA 차량 화면 | 카카오내비 앱 알림엔 회전 정보 없음 → SDK로 직접 안내 |
 
 ## 3. 핵심 리스크
 
@@ -39,13 +40,13 @@
 ### Phase 0 — 검증
 - [x] 알림 덤프 앱 (네이버/카카오 샘플 수집용)
 - [x] Kivic APK 분석 → 프로토콜 문서화
-- [ ] **키빅 BLE 테스트**: 연결 → 연결확인 → TBT 모드 → 테스트 TBT 표시 (앱 내 테스트 버튼)
-- [ ] 회전코드 순회로 아이콘 확인, `naviDisplayStatus`/`naviStatus` 값 확정
-- [ ] TMAP 개발자 센터 가입 → `clientID` / `apiKey` 발급, `userKey` 방식 확인
-- [ ] 네이버/카카오 알림 샘플 수집 (폰 단독 / AA 연결 중)
+- [x] 키빅 BLE 테스트: 연결 → TBT 모드 → TBT 표시 (Phase 1에서 HUD 표시 확인 2026-10-30)
+- [ ] 회전코드 순회로 아이콘 확인 — 회전교차로·경유지 코드는 아직 (Phase 2-K 매핑 표)
+- [x] TMAP 개발자 센터 `apiKey` 발급 — **2026-11-03 인증 실패**: 서버가 `INVALID_API_KEY`(재발급 키도, POI API도 같음) → 개발자 센터에서 키·상품 상태 확인 필요. 보류
+- [x] 네이버/카카오 알림 샘플 수집 (Phase 2 참고)
 
 ### Phase 1 — MVP: TMAP → Kivic
-- [x] EDC SDK 연동 (initialize → registerDataCallback) — 실기기 확인 2026-10-30. 등록은 서비스 연결 후(1초 뒤)·안내 시작 시 다시 해야 함
+- [x] EDC SDK 연동 (initialize → registerDataCallback) — 실기기 확인 2026-10-30 (2026-11-03부터 인증 실패, Phase 0 참고). 등록은 서비스 연결 후(1초 뒤)·안내 시작 시 다시 해야 함
   - 실제 RGData 키: allHighwayTbtList, approachingGuidePoint, averageSpeed, currentCourseAngle, currentRoadName, currentRoutePlan, destinationLatitude/Longitude/Name, firstTBTInfo, secondTBTInfo, gpsState, hasAlternativeRoute, hasTbtInfo, hipassLaneCount, isCaution, isNightMode, isOnHighway, isRoadHighWay, isShadeArea, laneAvailableInfo, laneBubbleList, laneCount, laneDistance, laneEtcInfo, laneTurnInfo, limitSpeed, matchedLatitude/Longitude, nGoPosDist, nGoPosTime, noLocationSignal, remainDistanceToDestinationInMeter, remainTimeToDestinationInSec, remainViaPointSize, showLane, showSDI, speedInKmPerHour
 - [x] RGData → TBTTmapData 변환 (TBT 코드·거리·명칭, 속도, SDI→안전운행, 차로) — 회전·거리·제한속도·단속카메라·차로 HUD 표시 확인 2026-10-30
 - [x] Foreground Service로 이동: 자동 재연결, KeepAlive (HUD 이벤트마다 응답, 12초 무응답 시 재연결)
@@ -115,23 +116,28 @@ DayzHUD를 Car App Library 내비 앱(`androidx.car.app.category.NAVIGATION`)으
 | 단계 | 내용 | 완료 기준 |
 |---|---|---|
 | A1 ✅ 2026-10-30 | `NavigationTemplate` 회전 카드(`RoutingInfo`/`Step`/`Maneuver`)·도착 정보(`TravelEstimate`), `NavigationManager.updateTrip` → 차량 계기판·순정 HUD. 지도 자리엔 큰 화살표·거리 직접 그림(`SurfaceCallback` Canvas) | DHU 화면·계기판에 안내 표시 |
-| A2 (코드 완료 2026-10-30, 실기기 미확인) | 차량 화면 '목적지' → 최근 목적지 `ListTemplate`(모의주행 토글) → '검색' `SearchTemplate` → 누르면 `KakaoGuidance.start` (폰 화면 없이 `startWithTrip`). 최근 목적지는 폰과 공유(`Recents.load/remember`) | 차에서 안내 시작 |
+| A2 ✅ DHU 2026-11-03 (차 검색·폰 앱 안 연 상태는 미확인) | 차량 화면 '목적지' → 최근 목적지 `ListTemplate`(모의주행 토글) → '검색' `SearchTemplate` → 누르면 `KakaoGuidance.start` (폰 화면 없이 `startWithTrip`). 최근 목적지는 폰과 공유(`Recents.load/remember`) | 차에서 안내 시작 |
 | A3 ✅ 2026-10-30 | 카카오 지도를 차량 화면에: `KNSDK.makeRendererWithFrame(..., Surface)` (우회 불필요). 경로 `setRoutes`·`cullPassedRoute(loc, false)`, 내 차는 `KNMapMarker`(userLocation은 렌더러에서 안 그려짐, 아래 끝 기준이라 pixelOffset), 위치는 경로 위 `KNLocation.pos` | DHU에서 지도·경로·내 차 확인 |
 
 KNRGCode → AA `Maneuver`: `CarManeuver` (테스트 있음). 안내는 `KakaoGuidance`(화면과 분리)가 들고 폰 화면·HUD·차량 화면이 같이 씀
 - 알려진 제약: 앱 재설치(프로세스 재시작) 뒤엔 기존 AA Surface가 막힘(IllegalArgumentException) → AA 재연결 필요
 - 시험: `bash tools/aa_test.sh [초]` (빌드·설치 → DHU 재시작 → 폰 모의주행 → `$TEMP/dayzhud/dhu_*.png`)
 
-#### 다음에 폰 연결하면 (A2 확인 목록)
-1. `bash tools/aa_test.sh` 로 설치·DHU 재시작 (폰 잠금 해제, AA 헤드 유닛 서버 켜짐)
-2. DHU에서 DayzHUD → '목적지' → 최근 목적지 목록 보이는지, '모의주행' 토글 → 항목 누르면 폰 화면 없이 안내 시작·지도·HUD 전송 되는지
-3. '검색' → 키보드로 검색 → 결과 누르면 안내 시작되는지 (DHU 키보드 입력)
-4. 폰 앱을 안 연 상태(HudService 없음)에서 차로 시작 시 HUD 연결되는지 — 로그 "차에서 HUD 연결 시작 실패"면 Android 12 백그라운드 FGS 제한 → 대안 검토
-5. '안내 종료' 버튼 → 지도·HUD 정리
+| A4 ✅ DHU 2026-11-03 | 지도 버튼(확대·축소·현재 위치, PAN으로 끌기 — `setPanModeListener` 있어야 PAN 버튼·끌기가 옴), 재탐색(앞 안내를 조용히 멈추고 새 경로로 이어감), 안내 종료, 정보판(속도·제한속도·카메라·돌발) | DHU에서 조작 확인 |
+
+즐겨찾기 (2026-11-03): 폰 검색 화면 ★/☆로 고정·해제 (`Favorites`, 최근 목적지와 같은 prefs). 차량 목적지 목록엔 즐겨찾기가 "★ 이름"으로 맨 위.
+차량 화면에서 고정·해제(스위치 목록)는 만들었다가 뺌 — 실차 목록 화면 자리를 차지함. 필요하면 git 기록에서 되살림.
+
+#### 실차에서 확인할 것
+1. 차량 화면 정보판 위치·크기: DHU(1190×700) 실측값 기준, 카드가 좁거나 화면이 낮으면 줄여 그림. 겹치거나 잘리면 로그 "차량 화면 보이는 영역"과 사진으로 `CARD_TOP` 조정
+2. 폰 앱을 안 연 상태에서 차로 안내 시작 → HUD 연결되는지 (로그 "차에서 HUD 연결 시작 실패"면 백그라운드 FGS 제한)
+3. 차 화면 검색 (주행 중엔 키보드 막힘 → 정차 중)
+4. K3 실주행 30분 (화면 꺼짐·앱 전환 중 안내·HUD 유지)
+5. '안내 종료' → 지도·HUD 정리
 
 ### Phase 3 — 실사용 안정화
-- [ ] 시동 시 자동 연결, 삼성 배터리 정책 테스트
-- [ ] 안내 종료/앱 종료 시 HUD 화면 정리 (`isConnected=false`)
+- [ ] 시동 시 자동 연결, 배터리 정책 테스트 (시험 폰 Redmi Note 12 HyperOS: 자동 시작·배터리 제한 없음 설정 필요할 수 있음)
+- [ ] 앱 종료 시 HUD 화면 정리 (`isConnected=false`) — 안내 종료 시 정리는 네이버·카카오 확인됨
 
 ### Phase 4 — 선택
 - HUD 설정(밝기·키스톤 등) — 원본 앱 패킷 존재 (`docs/kivic-protocol.md`)
@@ -149,7 +155,7 @@ KNRGCode → AA `Maneuver`: `CarManeuver` (테스트 있음). 안내는 `KakaoGu
 DayzHUD/
 ├─ PLAN.md
 ├─ docs/kivic-protocol.md
-└─ android/   # Kotlin, minSdk 29, AndroidX 미사용
+└─ android/   # Kotlin, minSdk 29. AndroidX는 KNSDK·Car App Library가 요구해서 사용
 ```
 
 ## 7. 주의

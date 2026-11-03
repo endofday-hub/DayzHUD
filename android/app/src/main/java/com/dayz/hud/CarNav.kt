@@ -89,7 +89,7 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
 
     private val nav = ctx.getCarService(NavigationManager::class.java)
     private var navigating = false
-    private var visible: Rect? = null
+    @Volatile private var visible: Rect? = null
     private val onState: () -> Unit = { invalidate(); updateTrip(); follow() }
 
     init {
@@ -305,7 +305,18 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
             canvas.drawBitmap(carBmp, -CAR_SIZE / 2f, -CAR_SIZE / 2f, carPaint)
             canvas.restore()
         }
-        panelOverlay?.let { canvas.drawBitmap(it, CARD_LEFT, CARD_TOP, null) }
+        panelOverlay?.let { b ->
+            // 카드가 DHU보다 좁으면(보이는 영역 왼쪽 = 카드 폭 + 여백) 같이 줄이고, 화면 아래로 넘치면 더 줄임 (키우진 않음)
+            val v = visible
+            val k = if (v != null && v.left > CARD_W / 2) ((v.left - 2 * CARD_LEFT) / CARD_W).coerceIn(0.5f, 1f) else 1f
+            val top = CARD_TOP * k
+            val s = minOf(k, ((v?.bottom ?: surfaceSize.second) - top) / b.height).coerceAtLeast(0.5f)
+            canvas.save()
+            canvas.translate(CARD_LEFT, top)
+            canvas.scale(s, s)
+            canvas.drawBitmap(b, 0f, 0f, carPaint)
+            canvas.restore()
+        }
     }
 
     // 지도 끌기: 내 차 따라가기를 멈추고 그 자리 보기 (현재 위치 버튼으로 복귀)
@@ -342,7 +353,7 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
     // ponytail: 지도 회전 부드러움은 감으로 정함 — 길이 비스듬히 오래 남으면 줄이고, 지도가 출렁이면 늘림
     private val CAM_TAU = 600f // ms. 지도 방향이 길 방향을 따라가는 시간 상수 (꼭짓점마다 꺾이는 걸 부드럽게)
     private val ARROW_TAU = 150f // ms. 내 차 화살표
-    // ponytail: 정보 자리는 DHU(1190x700, 분할 화면) 실측값. 회전 카드(차로·다음 안내 포함) 바로 아래 — 다른 화면 크기면 보이는 영역 로그 보고 조정
+    // ponytail: 정보 자리는 DHU(1190x700, 분할 화면) 실측값. 회전 카드(차로·다음 안내 포함) 바로 아래. 다른 화면은 카드 폭·바닥에 맞춰 줄이기만 함 (compose) — 카드 높이가 크게 다르면 보이는 영역 로그 보고 CARD_TOP 조정
     private val CARD_LEFT = 12f
     private val CARD_W = 318
     private val CARD_TOP = 240f
