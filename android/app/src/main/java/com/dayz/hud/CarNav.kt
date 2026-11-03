@@ -138,8 +138,10 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
             .addItem(Row.Builder().setTitle(if (simul) "모의주행: 켜짐" else "모의주행: 꺼짐").addText("PC 시험용 (DHU)").setBrowsable(true)
                 .setOnClickListener { simul = !simul; invalidate() }.build())
         val limit = carContext.getCarService(ConstraintManager::class.java).getContentLimit(ConstraintManager.CONTENT_LIMIT_TYPE_LIST)
-        for (p in Recents.load(prefs).take(limit - 2)) list.addItem(
-            Row.Builder().setTitle(p.name).addText(p.address.ifEmpty { " " }).setBrowsable(true)
+        // 즐겨찾기(폰 검색 화면에서 ★로 고정)가 최근 목적지보다 위
+        val fav = Favorites.load(prefs)
+        for (p in Favorites.withRecents(fav, Recents.load(prefs)).take(limit - 2)) list.addItem(
+            Row.Builder().setTitle(if (fav.any(p::same)) "★ ${p.name}" else p.name).addText(p.address.ifEmpty { " " }).setBrowsable(true)
                 .setOnClickListener { startFromCar(carContext, screenManager, p, simul) }.build(),
         )
         return PlaceListNavigationTemplate.Builder().setTitle("DayzHUD 카카오 길안내").setItemList(list.build()).setMapActionStrip(mapButtons()).setPanModeListener { }.build()

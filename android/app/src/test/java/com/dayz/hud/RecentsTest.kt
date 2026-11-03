@@ -18,6 +18,18 @@ class RecentsTest {
     }
 
     @Test
+    fun favoritesPinOnTop() {
+        val a = Place("집", 1, 1)
+        val b = Place("회사", 2, 2)
+        val c = Place("서울역", 3, 3)
+        var fav = Favorites.toggle(emptyList(), b)
+        fav = Favorites.toggle(fav, a)
+        assertEquals(listOf("회사", "집"), fav.map { it.name }) // 고정한 순서대로
+        assertEquals(listOf("회사", "집", "서울역"), Favorites.withRecents(fav, listOf(c, a)).map { it.name }) // 겹치면 한 번만
+        assertEquals(listOf("집"), Favorites.toggle(fav, b.copy(name = "회사(다른 이름)")).map { it.name }) // 같은 좌표면 해제
+    }
+
+    @Test
     fun keepsAtMostEight() {
         val list = (1..10).fold(emptyList<Place>()) { l, i -> Recents.add(l, Place("p$i", i, i)) }
         assertEquals(8, list.size)

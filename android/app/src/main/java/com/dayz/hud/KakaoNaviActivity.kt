@@ -1,6 +1,7 @@
 package com.dayz.hud
 
 import android.os.Bundle
+import android.view.Gravity
 import android.view.KeyEvent
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
@@ -63,22 +64,59 @@ class KakaoNaviActivity : AppCompatActivity() {
             addView(results)
         }
         setContentView(ScrollView(this).apply { setBackgroundColor(MainActivity.BG); addView(root) })
-        showPlaces("최근 목적지", Recents.load(prefs))
+        showHistory()
         input.requestFocus()
     }
 
     private fun search(q: String) {
-        if (q.isNotBlank()) KakaoGuidance.search(q) { showPlaces("검색 결과 ${it.size}건", it) }
+        if (q.isNotBlank()) KakaoGuidance.search(q) { list ->
+            showingHistory = false
+            results.removeAllViews()
+            section("검색 결과 ${list.size}건", list, Favorites.load(prefs))
+        }
     }
 
-    private fun showPlaces(title: String, places: List<Place>) {
+    // 검색 전: 즐겨찾기(★ 고정) 위, 최근 목적지 아래
+    private var showingHistory = false
+
+    private fun showHistory() {
+        showingHistory = true
         results.removeAllViews()
+        val fav = Favorites.load(prefs)
+        if (fav.isNotEmpty()) section("즐겨찾기", fav, fav)
+        val recent = Recents.load(prefs).filterNot { r -> fav.any(r::same) }
+        if (recent.isNotEmpty() || fav.isEmpty()) section("최근 목적지", recent, fav)
+    }
+
+    private fun section(title: String, places: List<Place>, fav: List<Place>) {
         results.addView(label("\n$title", 13f, MainActivity.ACCENT))
-        for (p in places) results.addView(label("${p.name}\n${p.address}", 16f, MainActivity.TEXT).apply {
+        for (p in places) results.addView(row(p, fav.any(p::same)))
+    }
+
+    // 한 줄: 누르면 안내, 오른쪽 ★/☆로 즐겨찾기 고정·해제
+    private fun row(p: Place, pinned: Boolean) = LinearLayout(this).apply {
+        gravity = Gravity.CENTER_VERTICAL
+        addView(label("${p.name}\n${p.address}", 16f, MainActivity.TEXT).apply {
             setPadding(0, dp(12), 0, dp(12))
             setOnClickListener {
                 Recents.remember(prefs, p)
                 navigate(p)
+            }
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        addView(label("", 24f, 0).apply {
+            var on = pinned
+            fun paint() {
+                text = if (on) "★" else "☆"
+                setTextColor(if (on) MainActivity.ACCENT else MainActivity.SUB)
+                contentDescription = if (on) "즐겨찾기 해제" else "즐겨찾기 고정"
+            }
+            paint()
+            setPadding(dp(16), dp(8), dp(4), dp(8))
+            setOnClickListener {
+                Favorites.toggle(prefs, p)
+                if (!on) Recents.remember(prefs, p) // 검색 결과에서 고정해도 기록에 남게
+                on = !on
+                if (showingHistory) showHistory() else paint() // 기록 화면이면 바로 위로 올림
             }
         })
     }
