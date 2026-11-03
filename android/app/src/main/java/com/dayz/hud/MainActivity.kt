@@ -7,6 +7,7 @@ import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.ContentValues
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Color
@@ -105,13 +106,13 @@ class MainActivity : Activity() {
                 "내비 연동",
                 navRow("TMAP", "회전·차로·제한속도·카메라 등 전체 (기본 내비가 TMAP이면 자동 연동, 아니면 연결 상태의 TMAP 연동 버튼)", null),
                 navRow("네이버지도", "Android Auto 연결 중 자동 표시 (회전·거리·속도)", null),
-                navRow("카카오내비", "앱 안에서 길안내 (카카오내비 SDK) · Android Auto 지도", null),
+                navRow("DayzHUD 길안내", "카카오내비 SDK로 앱 안에서 길안내 · Android Auto 지도", null),
                 // 카카오내비 SDK: 목적지 검색 → 앱 안에서 길안내 (모의주행은 시험용)
                 row(
                     outlineButton("카카오 길안내") { kakaoNavi(simul = false) },
                     outlineButton("모의주행") { kakaoNavi(simul = true) },
                 ),
-                field("앱 실행 시 자동 실행", segments(NAV_APPS.map { it.first }, prefs.getInt("navApp", 0)) {
+                field("앱 실행 시 자동 실행", segments(NAV_APPS.map { it.first }, NAV_APPS.indexOf(navApp(prefs))) {
                     prefs.edit().putInt("navApp", it).apply()
                 }),
             ),
@@ -152,7 +153,7 @@ class MainActivity : Activity() {
 
     // HUD 연결 + 기본 내비 실행. TMAP 연동은 서비스가 항상 켜지만 TMAP 화면은 안 띄운다 → 직접 실행
     private fun autoStart() {
-        val (name, pkg) = NAV_APPS[prefs.getInt("navApp", 0)]
+        val (name, pkg) = navApp(prefs)
         startForegroundService(Intent(this, HudService::class.java))
         if (pkg == null) return
         packageManager.getLaunchIntentForPackage(pkg)?.let(::startActivity) ?: log("$name 미설치")
@@ -291,12 +292,19 @@ class MainActivity : Activity() {
                 "폰에 TMAP 앱이 있어야 합니다. 인증 실패면 상품 구매·요금제 상태를 확인하세요.", 13f, SUB),
             row(link("요금 안내", "https://openapi.sk.com/products/calc?svcSeq=4&menuSeq=5"),
                 link("사용자 가이드", "https://openapi.sk.com/products/detail?svcSeq=60&menuSeq=126")).spaced(8),
+            text("네이버지도 (API 키 필요 없음)", 14f, ACCENT, bold = true).spaced(16),
+            text("Android Auto에 연결해 네이버지도로 안내할 때만 됩니다. 폰만으로 안내하면 알림에 회전 정보가 없습니다.\n" +
+                "1. '알림 접근 설정 열기' → DayzHUD 허용 (회색으로 막혀 있으면 설정 > 앱 > DayzHUD > ⋮ > '제한된 설정 허용' 후 다시)\n" +
+                "2. 'HUD 연결' 후 차(Android Auto)에서 네이버지도로 안내 시작 → HUD에 회전·거리, 속도는 폰 GPS\n" +
+                "남은 거리·도착 시각·제한속도는 차량 화면에만 있어 못 가져옵니다. 처음 보는 회전 아이콘은 화살표 없이 거리만 나오고 로그에 '네이버 새 회전 아이콘'으로 남습니다.", 13f, SUB),
             text("카카오 네이티브 앱 키 (카카오내비 SDK)", 14f, ACCENT, bold = true).spaced(16),
             text("개인·비상업은 무료 (실시간 길안내 하루 100,000건), 별도 신청 없음.\n" +
                 "1. 카카오 디벨로퍼스 로그인 → 내 애플리케이션 → 애플리케이션 추가\n" +
                 "2. 플랫폼 > Android 등록: 패키지명 $packageName, 키 해시는 아래 값 (누르면 복사)\n" +
                 "3. 앱 키 > 네이티브 앱 키를 'API 키'의 카카오 칸에 입력 → 저장 → 앱을 완전히 닫고 다시 열기\n" +
                 "C103 오류면 패키지명·키 해시 등록을 확인하세요.", 13f, SUB),
+            // 키 해시는 APK에 든 서명 인증서에서 나오는 값이라 비밀이 아님 (앱 키는 'API 키' 칸에만, 가려서)
+            text("이 앱의 키 해시 (앱 키 아님 · 보여도 괜찮은 값)", 13f, SUB).spaced(8),
             text(hash, 14f, TEXT, bold = true).apply {
                 typeface = Typeface.MONOSPACE
                 background = rounded(CHIP, 10)
@@ -548,7 +556,8 @@ class MainActivity : Activity() {
         // HUD 테마 색 (앰버·시안·핑크·옐로·그린) — 버튼 글자색으로 미리 보여 줌
         val THEME_COLORS = listOf(0xFFFFB300, 0xFF00E5FF, 0xFFFF4081, 0xFFFFEB3B, 0xFF69F0AE).map { it.toInt() }
         const val TMAP = "com.skt.tmap.ku"
-        // prefs "navApp" = 이 목록의 순번 (뒤에만 추가)
-        val NAV_APPS = listOf("없음" to null, "TMAP" to TMAP, "네이버지도" to NaverMapping.PKG, "카카오내비" to "com.locnall.KimGiSa")
+        // prefs "navApp" = 이 목록의 순번 (뒤에만 추가). 0 = 다른 앱 안 띄움 (DayzHUD 안의 카카오 SDK 길안내). 예전 3(카카오내비 앱)은 뺌 → 0으로
+        val NAV_APPS = listOf("DayzHUD" to null, "TMAP" to TMAP, "네이버지도" to NaverMapping.PKG)
+        fun navApp(p: SharedPreferences) = NAV_APPS.getOrElse(p.getInt("navApp", 0)) { NAV_APPS[0] }
     }
 }

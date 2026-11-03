@@ -61,7 +61,7 @@ class HudService : Service() {
         } else log("위치 권한 없음 — GPS 속도 미표시")
         kivic.connect()
         // TMAP 인증은 하루 한도(약 20건)가 있다 → 기본 내비가 TMAP일 때만 자동 연동. 그 외엔 메인 화면 "TMAP 연동" 버튼으로
-        if (MainActivity.NAV_APPS.getOrNull(getSharedPreferences("hud", MODE_PRIVATE).getInt("navApp", 0))?.second == MainActivity.TMAP) tmap.start()
+        if (MainActivity.navApp(getSharedPreferences("hud", MODE_PRIVATE)).second == MainActivity.TMAP) tmap.start()
         return START_STICKY
     }
 
