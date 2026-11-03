@@ -60,7 +60,8 @@ class HudService : Service() {
                 .requestLocationUpdates(LocationManager.GPS_PROVIDER, 1_000L, 0f, gps, Looper.getMainLooper())
         } else log("위치 권한 없음 — GPS 속도 미표시")
         kivic.connect()
-        tmap.start() // 기본 내비와 상관없이 항상 — TMAP을 켜면 바로 HUD에 나오게 (뒤에서 연결만, 화면 안 띄움)
+        // TMAP 인증은 하루 한도(약 20건)가 있다 → 기본 내비가 TMAP일 때만 자동 연동. 그 외엔 메인 화면 "TMAP 연동" 버튼으로
+        if (MainActivity.NAV_APPS.getOrNull(getSharedPreferences("hud", MODE_PRIVATE).getInt("navApp", 0))?.second == MainActivity.TMAP) tmap.start()
         return START_STICKY
     }
 

@@ -1,6 +1,7 @@
 package com.dayz.hud
 
 import android.app.Application
+import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
 import com.kakaomobility.knsdk.KNLanguageType
@@ -39,11 +40,16 @@ object KakaoGuidance :
     KNGuidance_SafetyGuideDelegate, KNGuidance_VoiceGuideDelegate, KNGuidance_CitsGuideDelegate {
 
     // 차량 화면용: HUD로 보낸 값 + 카카오 회전 코드(AA Maneuver 고르기용), 목적지 이름,
-    // 지도용 현재 위치(KATEC)·진행 방향·경로
+    // 지도용 현재 위치(KATEC)·진행 방향·경로, 앞쪽 돌발 정보(사고·공사 등)
     class State(
         val tbt: Tbt, val rg: Int, val nextRg: Int?, val destination: String,
         val pos: FloatPoint, val angle: Float, val location: KNLocation, val routes: List<KNRoute>?,
+        val event: RoadEvent?,
     )
+
+    class RoadEvent(val title: String, val distance: Int, val icon: Bitmap?)
+
+    private const val EVENT_RANGE = 3_000 // 이 거리 안의 돌발만 차량 화면에
 
     var state: State? = null
         private set
@@ -54,8 +60,11 @@ object KakaoGuidance :
     private var ready = false
     private var guidance: KNGuidance? = null
     private var destination = ""
+    private var lastTo: Place? = null // 재탐색용
+    private var lastSimul = false
     private var lastSent: Tbt? = null
     private var lastRoute = ""
+    private var lastEvent: String? = null
     private val PRIORITY = KNRoutePriority.KNRoutePriority_Recommand
 
     val active get() = guidance != null
@@ -90,9 +99,13 @@ object KakaoGuidance :
 
     // 현재 위치 → to 경로 탐색 후 안내 시작. view가 있으면 그 화면에 붙인다
     fun start(to: Place, simul: Boolean, done: (String?) -> Unit = {}) {
-        val here = KNSDK.sharedGpsManager()?.lastValidGpsData?.pos ?: return done("현재 위치 없음 (GPS 대기)")
+        // 안내 중이면 경로 위 지금 자리에서 (모의주행 재탐색도 그 자리에서 이어짐)
+        val (hx, hy) = state?.pos?.let { it.x.toInt() to it.y.toInt() }
+            ?: KNSDK.sharedGpsManager()?.lastValidGpsData?.pos?.let { it.x.toInt() to it.y.toInt() } ?: return done("현재 위치 없음 (GPS 대기)")
+        lastTo = to
+        lastSimul = simul
         log("카카오 경로 탐색 → ${to.name}")
-        val start = KNPOI("현위치", here.x.toInt(), here.y.toInt(), null)
+        val start = KNPOI("현위치", hx, hy, null)
         val dest = KNPOI(to.name, to.x, to.y, null)
         KNSDK.makeTripWithStart(start, dest, null, null) { err, trip ->
             if (err != null || trip == null) {
@@ -110,7 +123,8 @@ object KakaoGuidance :
     }
 
     private fun begin(trip: KNTrip, name: String, simul: Boolean) {
-        stop()
+        // 재탐색이면 앞 안내는 조용히 멈춤: end()로 끝을 알리면 AA엔 navigationEnded→Started가 붙어 가고 HUD도 한 번 꺼짐 (DHU: 새 안내까지 꺼짐)
+        guidance?.let { runCatching { it.stop() } }
         val g: KNGuidance = (if (simul) KNSDK.sharedSimulGuidance() else KNSDK.sharedGuidance()) ?: return
         g.guideStateDelegate = this
         g.locationGuideDelegate = this
@@ -125,6 +139,9 @@ object KakaoGuidance :
         if (v != null) v.initWithGuidance(g, trip, PRIORITY, 0) else g.startWithTrip(trip, PRIORITY, 0)
         log("카카오 안내 시작${if (simul) " (모의주행)" else ""}")
     }
+
+    // 같은 목적지로 지금 자리에서 다시 탐색
+    fun reroute(done: (String?) -> Unit) = lastTo?.let { start(it, lastSimul, done) } ?: done("재탐색할 목적지 없음")
 
     fun stop() {
         val g = guidance ?: return
@@ -190,7 +207,7 @@ object KakaoGuidance :
             nextDistance = next?.let { here.distToLocation(it.location) } ?: 0,
             remainDistance = trip.remainDist(),
             remainSeconds = trip.remainTime(),
-            speed = loc.gpsMatched.speed,
+            speed = loc.gpsMatched.speed.coerceAtLeast(0), // 모르면 -1이 옴 (모의주행 시작 직후 등)
             safety = safety?.let {
                 KakaoNaviMapping.Safety(
                     it.code.name,
@@ -208,11 +225,18 @@ object KakaoGuidance :
             laneDistance = lane?.let { here.distToLocation(it.location) } ?: 0,
         ))
         send(tbt)
+        val event = g.routeGuide?.roadEvents.orEmpty()
+            .map { it to here.distToLocation(it.location) }
+            .filter { it.second in 0..EVENT_RANGE }
+            .minByOrNull { it.second }
+            ?.let { (e, d) -> RoadEvent(e.title.orEmpty().ifEmpty { e.desc.orEmpty() }, d, e.icon) }
+        if (event != null && event.title != lastEvent) log("카카오 돌발: ${event.title} ${event.distance}m")
+        lastEvent = event?.title
         val gps = loc.gpsMatched
         state = State(
             tbt, dir.rgCode.value, next?.rgCode?.value, destination,
             // 지도엔 GPS가 아니라 경로 위 위치 — 그래야 내 차가 경로선에 딱 붙고 지나온 경로 지우기와 맞는다
-            FloatPoint(here.pos.x.toFloat(), here.pos.y.toFloat()), gps.angle.toFloat(), here, g.routesOnGuide,
+            FloatPoint(here.pos.x.toFloat(), here.pos.y.toFloat()), gps.angle.toFloat(), here, g.routesOnGuide, event,
         )
         listeners.forEach { it() }
     }

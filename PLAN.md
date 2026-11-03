@@ -60,13 +60,13 @@
 - [x] 네이버 알림 파서 (`NaverMapping`, AA 연결 중만) — HUD 회전·거리 표시, 종료 시 화면 정리 확인 2026-10-30
 - [x] 네이버 회전 아이콘 해시 → TMAP 회전코드 표 (6종 수집, 새 아이콘은 앱 로그로 확인 후 추가)
 - [x] 카카오내비: 알림엔 회전 정보 없음. AA 안내는 차량 계기판으로만 감(DHU 계기판에서 확인) → 폰에서 못 읽음
-- [ ] 카카오내비 HUD 모드 화면 읽기 (`KakaoHudReader` 접근성 + 화살표 캡처 모양 판별, 폰 단독) — 구현 2026-10-30, 실주행 확인·화살표 표 수집 필요
+- [x] ~~카카오내비 HUD 모드 화면 읽기 (`KakaoHudReader`)~~ — 2026-10-30 제거 (SDK 길안내로 대체)
   - 카카오내비는 모의주행 없음, Lockito 가짜 GPS도 걸러냄 → 실주행으로만 시험
   - 불안정하면 대안: KNSDK(카카오내비 SDK)로 앱 내 안내 + HUD (개인용 무료 한도 추정, 사용 신청 필요)
 - 네이버 남은 거리·도착 시각·제한속도: AA 화면에만 있음. 접근성 서비스 시험(2026-10-30) → AA 화면은 앱별 비공개 가상 디스플레이(`CarAppService`)라 display 0만 보임 → 불가
 
 ### Phase 2-K — 카카오내비 SDK(KNSDK)로 앱 안에서 길안내 → HUD
-화면 읽기(`KakaoHudReader`)는 카카오내비 화면이 켜져 있어야 하고 화살표를 그림으로 판별해 불안정할 수 있다.
+화면 읽기(`KakaoHudReader`)는 SDK 길안내로 대체해 제거함 (2026-10-30).
 KNSDK는 내비 엔진을 앱에 넣는 방식이라 회전 코드·거리·카메라·차로를 값으로 받는다 (TMAP EDC처럼 정확).
 
 - 조건: 카카오 디벨로퍼스 앱(네이티브 앱 키, 패키지 `com.dayz.hud` + 디버그 키 해시) — `secrets.properties`의 `KAKAO_APP_KEY` (완료 2026-10-30)
@@ -79,7 +79,7 @@ KNSDK는 내비 엔진을 앱에 넣는 방식이라 회전 코드·거리·카�
 | K1 안내 → HUD ✅ 2026-10-30 (모의주행으로 HUD 표시 확인, 차로 포함 — KNLane turnType 비트 = TMAP laneTurnInfo. HUD는 안내 지점 근처에서만 차로 표시) | `KNGuidance` 델리게이트(GuideState/RouteGuide/Location/Safety)를 `KNNaviView`에 넘기면서 값만 가로챔 → `KakaoNaviMapping` → `Tbt` → `kivic.sendTbt`. 종료 시 `ENDED` | 단위 테스트 + HUD에 회전·거리·남은 거리/시간·속도·카메라 표시 |
 | K2 목적지 입력 ✅ 2026-10-30 | SDK 내장 검색 `KNSDK.reqSearch(검색어, 페이지, 크기, 종류, x, y)` (KATEC, REST 키 불필요) → 안내 진입점(`guidePoints`) 우선 → `KNPOI`. 최근 목적지 8개 (`Recents`) | 앱에서 검색해 바로 안내 시작 |
 | K3 실주행 | 폰 단독 주행, 화면 꺼짐·다른 앱 전환 중에도 안내 유지 확인 (HudService가 프로세스 유지) | 30분 주행 끊김 없음 |
-| K4 선택 | 차로(`KNLane`) → TMAP 차로 비트, 고속도로 정보, 음성 설정. 결과 좋으면 `KakaoHudReader` 제거 | — |
+| K4 선택 | 차로(`KNLane`) → TMAP 차로 비트, 고속도로 정보, 음성 설정. `KakaoHudReader` 제거 완료 | — |
 
 매핑 표 (`KNRGCode` → TMAP TurnType, Kivic이 그리는 코드):
 | KNRGCode | 의미 | TMAP |

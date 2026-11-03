@@ -14,7 +14,7 @@ data class HudSettings(
     val showSpeed: Boolean = true,
     val speedGauge: Boolean = false,
     val speedColor: Int = WHITE,
-    val clock: Boolean = false,
+    val clock: Boolean = true, // 재설치하면 설정이 초기화되므로 기본 켬
     val autoBrightness: Boolean = true,
     val brightness: Int = 255,
 ) {

@@ -37,7 +37,8 @@ class MainActivity : Activity() {
 
     private lateinit var hudState: TextView
     private lateinit var notiState: TextView
-    private lateinit var kakaoState: TextView
+    private lateinit var tmapState: TextView
+    private lateinit var tmapBtn: TextView
     private lateinit var notiHelp: View
     private lateinit var connectBtn: TextView
     private lateinit var dumpInfo: TextView
@@ -58,7 +59,10 @@ class MainActivity : Activity() {
 
         hudState = text("", 15f, bold = true)
         notiState = text("", 15f, bold = true)
-        kakaoState = text("", 15f, bold = true)
+        tmapState = text("", 15f, bold = true)
+        // 인증 한도 때문에 기본 내비가 TMAP이 아니면 누를 때만 연동 (실패 후 다시 시도도 이 버튼)
+        // ponytail: 다시 시도는 finish 직후 바로 initialize — SDK가 싫어하면 onFinishedEDC 뒤에 시작하도록
+        tmapBtn = outlineButton("TMAP 연동") { HudService.instance?.tmap?.run { if (state != TmapSource.State.OFF) stop(); start() } }
         connectBtn = button("") {
             if (HudService.instance == null) {
                 withBle { startForegroundService(Intent(this, HudService::class.java)) }
@@ -86,17 +90,16 @@ class MainActivity : Activity() {
             card(
                 "연결 상태",
                 statusRow("HUD", hudState),
+                statusRow("TMAP", tmapState).apply { addView(tmapBtn, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { marginStart = dp(10) }) },
                 statusRow("알림 접근", notiState),
-                statusRow("카카오 화면 읽기", kakaoState),
                 notiHelp,
                 connectBtn.spaced(14),
             ),
             card(
                 "내비 연동",
-                navRow("TMAP", "회전·차로·제한속도·카메라 등 전체 (HUD 연결 시 자동 연동)", null),
+                navRow("TMAP", "회전·차로·제한속도·카메라 등 전체 (기본 내비가 TMAP이면 자동 연동, 아니면 연결 상태의 TMAP 연동 버튼)", null),
                 navRow("네이버지도", "Android Auto 연결 중 자동 표시 (회전·거리·속도)", null),
-                navRow("카카오내비", "폰 단독 + HUD 모드 화면을 켜 둔 동안 (접근성 권한)",
-                    outlineButton("접근성") { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }),
+                navRow("카카오내비", "앱 안에서 길안내 (카카오내비 SDK) · Android Auto 지도", null),
                 // 카카오내비 SDK: 목적지 검색 → 앱 안에서 길안내 (모의주행은 시험용)
                 row(
                     outlineButton("카카오 길안내") { kakaoNavi(simul = false) },
@@ -172,6 +175,19 @@ class MainActivity : Activity() {
         }
         hudState.text = "● $label"
         hudState.setTextColor(color)
+        // TMAP 연동은 HUD 서비스가 켜질 때 같이 시작
+        val tmap = svc?.tmap?.state ?: TmapSource.State.OFF
+        tmapState.text = "● ${tmap.label}"
+        tmapState.setTextColor(
+            when (tmap) {
+                TmapSource.State.READY, TmapSource.State.GUIDING -> OK
+                TmapSource.State.CONNECTING -> ACCENT
+                TmapSource.State.OFF -> SUB
+                else -> BAD
+            },
+        )
+        val idle = tmap == TmapSource.State.OFF || tmap == TmapSource.State.AUTH_FAILED || tmap == TmapSource.State.FAILED
+        tmapBtn.visibility = if (svc != null && idle) View.VISIBLE else View.GONE
         connectBtn.text = if (svc == null) "HUD 연결" else "연결 종료"
         connectBtn.background = if (svc == null) pressable(rounded(ACCENT, 12)) else pressable(rounded(CHIP, 12))
         connectBtn.setTextColor(if (svc == null) Color.BLACK else TEXT)
@@ -181,10 +197,6 @@ class MainActivity : Activity() {
         notiState.text = if (granted) "● 허용됨" else "● 필요"
         notiState.setTextColor(if (granted) OK else BAD)
         notiHelp.visibility = if (granted) View.GONE else View.VISIBLE
-        val reading = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
-            ?.contains(ComponentName(this, KakaoHudReader::class.java).flattenToString()) == true
-        kakaoState.text = if (reading) "● 켜짐" else "● 꺼짐"
-        kakaoState.setTextColor(if (reading) OK else SUB)
 
         val dir = dumpDir(this)
         val records = File(dir, LOG).takeIf { it.exists() }?.useLines { it.count() } ?: 0
@@ -454,6 +466,6 @@ class MainActivity : Activity() {
         val THEME_COLORS = listOf(0xFFFFB300, 0xFF00E5FF, 0xFFFF4081, 0xFFFFEB3B, 0xFF69F0AE).map { it.toInt() }
         const val TMAP = "com.skt.tmap.ku"
         // prefs "navApp" = 이 목록의 순번 (뒤에만 추가)
-        val NAV_APPS = listOf("없음" to null, "TMAP" to TMAP, "네이버지도" to NaverMapping.PKG, "카카오내비" to KakaoMapping.PKG)
+        val NAV_APPS = listOf("없음" to null, "TMAP" to TMAP, "네이버지도" to NaverMapping.PKG, "카카오내비" to "com.locnall.KimGiSa")
     }
 }

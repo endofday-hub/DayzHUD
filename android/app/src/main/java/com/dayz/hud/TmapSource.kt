@@ -15,6 +15,12 @@ class TmapSource(
     private val log: (String) -> Unit,
     private val onTbt: (Tbt) -> Unit,
 ) {
+    // 연결 상태 (메인 화면 표시용). 바뀔 때 로그도 남겨서 화면이 새로 그려진다
+    enum class State(val label: String) { OFF("꺼짐"), NO_KEY("키 없음"), CONNECTING("연결 중…"), READY("연결됨 · 대기"), GUIDING("안내 받는 중"), AUTH_FAILED("인증 실패"), FAILED("실패") }
+    @Volatile var state = State.OFF
+        private set
+    private fun set(s: State) { state = s }
+
     private var keysLogged = false
     private var last: Tbt? = null
     private var lastAt = 0L
@@ -23,13 +29,14 @@ class TmapSource(
     // 안내를 끝내도 TMAP이 onRouteFinished 없이 RGData만 끊는 경우가 있다 (실기기) → HUD에 마지막 화면이 남음.
     // RGData는 1초마다 오므로 3초 끊기면 종료로 본다 (원본 앱도 TMAP 정보가 없으면 종료 패킷 전송)
     private val dataTimeout = Runnable {
+        set(State.READY)
         log("TMAP 데이터 끊김 → 안내 종료")
         emit(TmapMapping.ENDED)
     }
 
     fun start() {
-        if (BuildConfig.TMAP_API_KEY.isEmpty()) return log("android/secrets.properties에 TMAP_API_KEY 없음")
-        if (TmapEDCSDK.isInitialized) return register()
+        if (BuildConfig.TMAP_API_KEY.isEmpty()) return set(State.NO_KEY).also { log("android/secrets.properties에 TMAP_API_KEY 없음") }
+        if (TmapEDCSDK.isInitialized) return set(State.READY).also { register() }
         val auth = TmapEDCSDK.Companion.EDCAuthData(
             BuildConfig.TMAP_CLIENT_ID,
             BuildConfig.TMAP_API_KEY,
@@ -37,11 +44,13 @@ class TmapSource(
             BuildConfig.TMAP_USER_KEY,
             BuildConfig.TMAP_DEVICE_KEY,
         )
+        set(State.CONNECTING)
         log("TMAP 연동 시작")
         TmapEDCSDK.initialize(ctx.applicationContext, auth, work, false)
     }
 
     fun stop() {
+        set(State.OFF)
         main.removeCallbacks(dataTimeout)
         runCatching {
             TmapEDCSDK.unregisterDataCallback()
@@ -68,30 +77,48 @@ class TmapSource(
     private val work = object : TmapEDCSDK.Companion.EDCWorkListener {
         // bindService 직후 동기 호출 → 아직 서비스 미연결이라 SDK가 등록을 조용히 무시함 (실기기 로그). 1초 뒤 다시 등록
         override fun onInitSuccessEDC() {
+            set(State.READY)
+            log("TMAP 연결됨")
             main.postDelayed(::register, 1_000)
         }
         override fun onHostAppStarted() = register()
         override fun onFinishedEDC() {
+            set(State.OFF)
             log("EDC 종료")
             emit(TmapMapping.ENDED)
         }
-        override fun onAuthAction(bundle: Bundle) = log("EDC 인증 상태: ${bundle.getInt("authStatus")}")
+        // authStatus: -1 실패, 0 진행 중, 1 성공 (EDC 문서)
+        override fun onAuthAction(bundle: Bundle) {
+            val a = bundle.getInt("authStatus")
+            if (a == -1) set(State.AUTH_FAILED)
+            log(if (a == -1) "TMAP 인증 실패 (TMAP_API_KEY 확인 — 서버는 appKey만 검사)" else "EDC 인증 상태: $a")
+            // 실패 사유가 authStatus 말고 다른 값으로 오는지 확인용 (키 이름에 key/token 들어간 값은 가림)
+            log("EDC 인증 응답: " + bundle.toMap().map { (k, v) -> "$k=" + if (Regex("key|token|secret", RegexOption.IGNORE_CASE).containsMatchIn(k)) "***" else v }.joinToString())
+        }
         override fun onRouteStarted(bundle: Bundle) {
+            set(State.GUIDING)
             log("TMAP 안내 시작")
             register() // 등록이 빠졌어도 안내 시작 시점엔 확실히 붙도록
         }
         override fun onRouteFinished(bundle: Bundle) {
+            set(State.READY)
             log("TMAP 안내 종료")
             emit(TmapMapping.ENDED)
         }
         override fun onResult(commandState: EDCConst.CommandState, o: Any) = log("EDC $commandState: $o")
-        override fun onFail(commandState: EDCConst.CommandState, i: Int, s: String?) =
+        override fun onFail(commandState: EDCConst.CommandState, i: Int, s: String?) {
+            if (state != State.AUTH_FAILED) set(State.FAILED) // 인증 실패 뒤 콜백 등록도 실패로 오는데, 원인(인증)을 화면에 남긴다
             log("EDC 실패 $commandState ($i) $s")
+        }
     }
 
     private val data = object : TmapEDCSDK.Companion.TMAPDataListener {
         override fun onReceive(bundle: Bundle?) {
             val m = bundle?.toMap() ?: return
+            if (state != State.GUIDING) {
+                set(State.GUIDING)
+                log("TMAP 안내 데이터 받는 중")
+            }
             if (!keysLogged) {
                 keysLogged = true
                 log("RGData 키: ${m.keys.sorted()}")

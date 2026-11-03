@@ -52,6 +52,17 @@ object KakaoNaviMapping {
 
     fun sdiCode(name: String): Int? = SDI[name.removePrefix("KNSafetyCode_")]
 
+    // TMAP nSdiType → 차량 화면에 쓸 이름 (위 SDI 표에 나오는 코드만)
+    private val SDI_LABEL = mapOf(
+        0 to "신호·과속 카메라", 1 to "과속 카메라", 2 to "구간단속 시작", 3 to "구간단속 끝", 4 to "구간단속 중",
+        6 to "신호위반 카메라", 7 to "이동식 카메라", 8 to "박스형 카메라", 9 to "버스전용차로 카메라",
+        11 to "갓길 단속", 12 to "끼어들기 단속", 13 to "교통정보 수집", 15 to "과적 단속", 16 to "적재불량 단속",
+        17 to "주정차 단속", 19 to "철길 건널목", 20 to "어린이 보호구역", 22 to "과속방지턱",
+        64 to "노후경유차 단속", 65 to "차로변경 단속",
+    )
+
+    fun sdiLabel(code: Int) = SDI_LABEL[code] ?: "주의"
+
     // 이 거리 안의 안전 정보만 HUD에 (TMAP showSDI와 비슷하게)
     private const val SDI_RANGE = 1_000
 
