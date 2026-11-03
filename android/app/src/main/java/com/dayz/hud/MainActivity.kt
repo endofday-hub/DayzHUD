@@ -2,6 +2,8 @@ package com.dayz.hud
 
 import android.Manifest
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.ContentValues
 import android.content.Intent
@@ -11,12 +13,15 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
 import android.provider.Settings
+import android.text.InputType
+import android.util.Base64
 import android.view.Gravity
 import android.view.View
 import android.widget.EditText
@@ -28,6 +33,7 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import java.io.File
+import java.security.MessageDigest
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlin.math.roundToInt
@@ -110,6 +116,8 @@ class MainActivity : Activity() {
                 }),
             ),
             card("HUD 화면", *settingsSection().toTypedArray()),
+            fold("API 키", *keysSection().toTypedArray()),
+            fold("도움말", *helpSection().toTypedArray()),
             fold(
                 "테스트 도구",
                 tbtInput,
@@ -234,6 +242,81 @@ class MainActivity : Activity() {
         hud.save(prefs)
         kivic?.sendFrames(KivicPacket.settings(hud))
     }
+
+    // ── API 키: 앱에서 입력 (비우면 빌드 때 넣은 키). 값은 가려서 표시 ──
+
+    private fun keysSection(): List<View> {
+        val tmap = keyInput(ApiKeys.TMAP, BuildConfig.TMAP_API_KEY)
+        val kakao = keyInput(ApiKeys.KAKAO, BuildConfig.KAKAO_APP_KEY)
+        return listOf(
+            text("비워 두면 빌드 때 넣은 키(secrets.properties)를 씁니다.", 13f, SUB),
+            field("TMAP API 키 (appKey)", tmap),
+            field("카카오 네이티브 앱 키", kakao),
+            button("저장") {
+                prefs.edit().putString(ApiKeys.TMAP, tmap.text.toString().trim()).putString(ApiKeys.KAKAO, kakao.text.toString().trim()).apply()
+                // TMAP은 바로 다시 인증. 카카오 SDK는 한 번 초기화되면 키를 못 바꿈 → 앱을 다시 시작해야
+                HudService.instance?.tmap?.run { if (state != TmapSource.State.OFF) { stop(); start() } }
+                toast("저장함. 카카오 키는 앱을 완전히 닫고 다시 열면 적용")
+            }.spaced(14),
+        )
+    }
+
+    private fun keyInput(pref: String, built: String) = EditText(this).apply {
+        setText(prefs.getString(pref, ""))
+        hint = if (built.isEmpty()) "입력 필요" else "비우면 빌드 키 사용"
+        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        typeface = Typeface.DEFAULT // 비밀번호 칸은 고정폭 글꼴이 기본 (setSingleLine은 쓰면 가림이 풀림)
+        setTextColor(TEXT)
+        setHintTextColor(SUB)
+        background = rounded(CHIP, 10)
+        setPadding(dp(12), dp(10), dp(12), dp(10))
+    }
+
+    // ── 도움말: 사용 순서, API 키 발급 (README.md와 같은 내용) ──
+
+    private fun helpSection(): List<View> {
+        val hash = keyHash()
+        return listOf(
+            text("사용 순서", 14f, ACCENT, bold = true),
+            text("1. HUD를 켜고 'HUD 연결' (처음엔 블루투스·위치·알림 권한 허용). 원본 Kivic 앱이 HUD에 붙어 있으면 연결이 안 됩니다.\n" +
+                "2. 내비 고르기 — TMAP: TMAP 앱 안내를 받아 옴 (유료 API 키 필요) / 네이버지도: Android Auto 연결 중 자동 / 카카오: '카카오 길안내'로 앱 안에서 안내, 차에선 Android Auto의 DayzHUD\n" +
+                "3. 즐겨찾기: 카카오 길안내 검색 화면에서 ☆를 누르면 맨 위에 고정 (차량 목록에도 ★로 표시)\n" +
+                "4. '앱 실행 시 자동 실행'으로 평소 쓰는 내비를 고르면 앱을 열 때 HUD 연결과 함께 실행", 13f, SUB),
+            text("TMAP API 키 (EDC)", 14f, ACCENT, bold = true).spaced(16),
+            text("무료 요금제는 하루 1건이라 실제로는 못 씁니다. Premium 요금제 가입 필요 (1건당 110원).\n" +
+                "1. SK open API(openapi.sk.com) 회원 가입 → 로그인\n" +
+                "2. 앱 사용하기: 앱을 만들고 앱키(appKey) 발급\n" +
+                "3. 상품 사용하기: TMAP API 상품 구매 → Premium 요금제\n" +
+                "4. 앱키를 'API 키'의 TMAP 칸에 입력 → 저장 → 'TMAP 연동'\n" +
+                "폰에 TMAP 앱이 있어야 합니다. 인증 실패면 상품 구매·요금제 상태를 확인하세요.", 13f, SUB),
+            row(link("요금 안내", "https://openapi.sk.com/products/calc?svcSeq=4&menuSeq=5"),
+                link("사용자 가이드", "https://openapi.sk.com/products/detail?svcSeq=60&menuSeq=126")).spaced(8),
+            text("카카오 네이티브 앱 키 (카카오내비 SDK)", 14f, ACCENT, bold = true).spaced(16),
+            text("개인·비상업은 무료 (실시간 길안내 하루 100,000건), 별도 신청 없음.\n" +
+                "1. 카카오 디벨로퍼스 로그인 → 내 애플리케이션 → 애플리케이션 추가\n" +
+                "2. 플랫폼 > Android 등록: 패키지명 $packageName, 키 해시는 아래 값 (누르면 복사)\n" +
+                "3. 앱 키 > 네이티브 앱 키를 'API 키'의 카카오 칸에 입력 → 저장 → 앱을 완전히 닫고 다시 열기\n" +
+                "C103 오류면 패키지명·키 해시 등록을 확인하세요.", 13f, SUB),
+            text(hash, 14f, TEXT, bold = true).apply {
+                typeface = Typeface.MONOSPACE
+                background = rounded(CHIP, 10)
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                setOnClickListener {
+                    getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("키 해시", hash))
+                    toast("키 해시 복사함")
+                }
+            }.spaced(8),
+            link("카카오 디벨로퍼스", "https://developers.kakao.com/console/app").spaced(8),
+        )
+    }
+
+    private fun link(label: String, url: String) = outlineButton(label) { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+
+    // 카카오 콘솔에 넣는 키 해시 = 서명 인증서 SHA-1의 Base64. 빌드한 PC(서명 키)마다 다름
+    private fun keyHash() = runCatching {
+        packageManager.getPackageInfo(packageName, PackageManager.GET_SIGNING_CERTIFICATES).signingInfo?.apkContentsSigners.orEmpty()
+            .joinToString("\n") { Base64.encodeToString(MessageDigest.getInstance("SHA-1").digest(it.toByteArray()), Base64.NO_WRAP) }
+    }.getOrDefault("").ifEmpty { "확인 실패" }
 
     // ── 화면 조각 ──
 

@@ -1,6 +1,7 @@
 package com.dayz.hud
 
 import android.app.Application
+import android.content.Context
 import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
@@ -73,7 +74,7 @@ object KakaoGuidance :
         if (ready) return done(null)
         KNSDK.install(app, "${app.filesDir}/knsdk")
         KNSDK.initializeWithAppKey(
-            aAppKey = BuildConfig.KAKAO_APP_KEY,
+            aAppKey = ApiKeys.kakao(app.getSharedPreferences("hud", Context.MODE_PRIVATE)),
             aClientVersion = BuildConfig.VERSION_NAME,
             aLangType = KNLanguageType.KNLanguageType_KOREAN,
             aCompletion = { err -> main.post { ready = err == null; done(err) } },

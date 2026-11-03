@@ -35,11 +35,12 @@ class TmapSource(
     }
 
     fun start() {
-        if (BuildConfig.TMAP_API_KEY.isEmpty()) return set(State.NO_KEY).also { log("android/secrets.properties에 TMAP_API_KEY 없음") }
+        val key = ApiKeys.tmap(ctx.getSharedPreferences("hud", Context.MODE_PRIVATE))
+        if (key.isEmpty()) return set(State.NO_KEY).also { log("TMAP API 키 없음 (앱의 API 키 항목에서 입력)") }
         if (TmapEDCSDK.isInitialized) return set(State.READY).also { register() }
         val auth = TmapEDCSDK.Companion.EDCAuthData(
             BuildConfig.TMAP_CLIENT_ID,
-            BuildConfig.TMAP_API_KEY,
+            key,
             ctx.packageName,
             BuildConfig.TMAP_USER_KEY,
             BuildConfig.TMAP_DEVICE_KEY,
@@ -91,7 +92,7 @@ class TmapSource(
         override fun onAuthAction(bundle: Bundle) {
             val a = bundle.getInt("authStatus")
             if (a == -1) set(State.AUTH_FAILED)
-            log(if (a == -1) "TMAP 인증 실패 (TMAP_API_KEY 확인 — 서버는 appKey만 검사)" else "EDC 인증 상태: $a")
+            log(if (a == -1) "TMAP 인증 실패 (TMAP API 키 확인 — 서버는 appKey만 검사)" else "EDC 인증 상태: $a")
             // 실패 사유가 authStatus 말고 다른 값으로 오는지 확인용 (키 이름에 key/token 들어간 값은 가림)
             log("EDC 인증 응답: " + bundle.toMap().map { (k, v) -> "$k=" + if (Regex("key|token|secret", RegexOption.IGNORE_CASE).containsMatchIn(k)) "***" else v }.joinToString())
         }

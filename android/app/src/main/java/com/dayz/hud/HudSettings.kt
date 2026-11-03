@@ -50,3 +50,12 @@ data class HudSettings(
         }
     }
 }
+
+// API 키: 앱에서 입력한 값(prefs "hud") 우선, 비어 있으면 빌드 때 넣은 secrets.properties 값
+object ApiKeys {
+    const val TMAP = "tmapApiKey"
+    const val KAKAO = "kakaoAppKey"
+
+    fun tmap(p: SharedPreferences) = p.getString(TMAP, null)?.trim()?.ifEmpty { null } ?: BuildConfig.TMAP_API_KEY
+    fun kakao(p: SharedPreferences) = p.getString(KAKAO, null)?.trim()?.ifEmpty { null } ?: BuildConfig.KAKAO_APP_KEY
+}
