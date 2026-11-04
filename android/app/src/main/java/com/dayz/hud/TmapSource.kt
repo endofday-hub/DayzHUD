@@ -59,8 +59,11 @@ class TmapSource(
         }
     }
 
+    // SDK는 콜백이 이미 저장돼 있으면 TMAP 등록을 건너뛴다 (TmapRemoteService.registerDataCallback: dataCallback != null → 무시).
+    // 인증 전에 한 등록이 TMAP에 안 붙으면 그 뒤 등록이 전부 무시돼 RGData가 안 옴 (실기기 2026-11-04) → 매번 해제 후 등록
     private fun register() {
         log("RGData 콜백 등록")
+        runCatching { TmapEDCSDK.unregisterDataCallback() }
         TmapEDCSDK.registerDataCallback(data)
     }
 
@@ -92,6 +95,7 @@ class TmapSource(
         override fun onAuthAction(bundle: Bundle) {
             val a = bundle.getInt("authStatus")
             if (a == -1) set(State.AUTH_FAILED)
+            if (a == 1) register() // 인증이 끝난 뒤의 등록이 확실히 붙도록
             log(if (a == -1) "TMAP 인증 실패 (TMAP API 키 확인 — 서버는 appKey만 검사)" else "EDC 인증 상태: $a")
             // 실패 사유가 authStatus 말고 다른 값으로 오는지 확인용 (키 이름에 key/token 들어간 값은 가림)
             log("EDC 인증 응답: " + bundle.toMap().map { (k, v) -> "$k=" + if (Regex("key|token|secret", RegexOption.IGNORE_CASE).containsMatchIn(k)) "***" else v }.joinToString())
@@ -108,6 +112,9 @@ class TmapSource(
         }
         override fun onResult(commandState: EDCConst.CommandState, o: Any) = log("EDC $commandState: $o")
         override fun onFail(commandState: EDCConst.CommandState, i: Int, s: String?) {
+            // TMAP 앱이 안 켜져 있으면 콜백 등록이 TMAP_IS_NOT_RUNNING으로 실패 → 실패가 아니라 대기. TMAP이 켜지면 onHostAppStarted에서 다시 등록
+            // (실패로 두면 'TMAP 연동' 버튼이 다시 나오고, 누르면 인증을 또 해서 요금이 나감)
+            if (s == "TMAP_IS_NOT_RUNNING") return log("TMAP 앱이 꺼져 있음 → TMAP을 켜면 자동으로 받기 시작")
             if (state != State.AUTH_FAILED) set(State.FAILED) // 인증 실패 뒤 콜백 등록도 실패로 오는데, 원인(인증)을 화면에 남긴다
             log("EDC 실패 $commandState ($i) $s")
         }
