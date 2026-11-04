@@ -76,9 +76,17 @@ class MainActivity : Activity() {
             } else stopService(Intent(this, HudService::class.java))
         }
         notiHelp = column(
-            text("네이버지도 안내를 받으려면 알림 접근을 허용하세요.\n" +
-                "DayzHUD가 회색이면: 설정 > 앱 > DayzHUD > ⋮ > '제한된 설정 허용'", 13f, SUB),
-            outlineButton("알림 접근 설정 열기") { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
+            text("네이버지도 안내·카톡·문자를 받으려면 알림 접근을 허용하세요.\n" +
+                "DayzHUD가 회색이면: 설정 > 앱 > DayzHUD > ⋮ > '제한된 설정 허용'\n" +
+                "허용했는데 '연결 안 됨'이면 (샤오미): '자동 시작 설정'에서 DayzHUD 켜기", 13f, SUB),
+            row(
+                outlineButton("알림 접근 설정") { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
+                // HyperOS는 앱 정보가 아니라 보안 앱의 '백그라운드 자동 시작' 목록. 다른 폰이면 앱 정보로
+                outlineButton("자동 시작 설정") {
+                    runCatching { startActivity(Intent().setClassName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity")) }
+                        .onFailure { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) }
+                },
+            ),
         )
         logView = text("", 11f, SUB).apply { typeface = Typeface.MONOSPACE }
         dumpInfo = text("", 13f, SUB)
@@ -124,6 +132,9 @@ class MainActivity : Activity() {
                 tbtInput,
                 row(button("TBT 전송") { sendTbt(tbtFromInput()) }, outlineButton("안내 종료") { sendTbt(TmapMapping.ENDED) }),
                 outlineButton("회전코드 순회 (3초 간격)") { sweep(0) }.spaced(8),
+                outlineButton("카톡 알림 시험") {
+                    kivic?.sendFrames(listOf(KivicPacket.social(KivicPacket.KAKAO, "", "DayzHUD : 카톡 알림 시험"))) ?: log("먼저 HUD 연결")
+                }.spaced(8),
             ),
             fold("로그", logView),
             fold(
@@ -203,9 +214,11 @@ class MainActivity : Activity() {
 
         val granted = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
             ?.contains(ComponentName(this, NavNotificationListener::class.java).flattenToString()) == true
-        notiState.text = if (granted) "● 허용됨" else "● 필요"
-        notiState.setTextColor(if (granted) OK else BAD)
-        notiHelp.visibility = if (granted) View.GONE else View.VISIBLE
+        // 허용돼 있어도 시스템이 리스너를 안 붙일 수 있다 (HyperOS 자동 시작 꺼짐 → 'Reject service')
+        val live = granted && NavNotificationListener.live
+        notiState.text = when { live -> "● 허용됨"; granted -> "● 연결 안 됨"; else -> "● 필요" }
+        notiState.setTextColor(if (live) OK else BAD)
+        notiHelp.visibility = if (live) View.GONE else View.VISIBLE
 
         val dir = dumpDir(this)
         val records = File(dir, LOG).takeIf { it.exists() }?.useLines { it.count() } ?: 0
@@ -232,6 +245,9 @@ class MainActivity : Activity() {
             toggle("전체 화면", hud.fullScreen) { update { copy(fullScreen = it) } },
             toggle("자동 밝기", hud.autoBrightness) { update { copy(autoBrightness = it) } },
             slider("수동 밝기 (자동 밝기 끈 경우)", hud.brightness / 255f) { update { copy(brightness = (it * 255).toInt()) } },
+            // 알림 접근 허용이 있어야 읽힘. 카톡 알림 미리보기를 끄면 내용 대신 '새 메시지'만 옴
+            toggle("카톡 알림 표시", hud.kakaoTalk) { update { copy(kakaoTalk = it) } },
+            toggle("문자 알림 표시", hud.sms) { update { copy(sms = it) } },
             outlineButton("설정 다시 전송") { kivic?.sendFrames(KivicPacket.settings(hud)) ?: log("먼저 HUD 연결") }.spaced(16),
         )
     }
@@ -282,7 +298,8 @@ class MainActivity : Activity() {
             text("1. HUD를 켜고 'HUD 연결' (처음엔 블루투스·위치·알림 권한 허용). 원본 Kivic 앱이 HUD에 붙어 있으면 연결이 안 됩니다.\n" +
                 "2. 내비 고르기 — TMAP: TMAP 앱 안내를 받아 옴 (유료 API 키 필요) / 네이버지도: Android Auto 연결 중 자동 / 카카오: '카카오 길안내'로 앱 안에서 안내, 차에선 Android Auto의 DayzHUD\n" +
                 "3. 즐겨찾기: 카카오 길안내 검색 화면에서 ☆를 누르면 맨 위에 고정 (차량 목록에도 ★로 표시)\n" +
-                "4. '앱 실행 시 자동 실행'으로 평소 쓰는 내비를 고르면 앱을 열 때 HUD 연결과 함께 실행", 13f, SUB),
+                "4. '앱 실행 시 자동 실행'으로 평소 쓰는 내비를 고르면 앱을 열 때 HUD 연결과 함께 실행\n" +
+                "5. 카톡·문자 알림: 알림 접근을 허용하면 HUD에 10초 표시 ('HUD 화면'에서 끄기). 카톡 미리보기를 끄면 내용은 안 나옴", 13f, SUB),
             text("TMAP API 키 (EDC)", 14f, ACCENT, bold = true).spaced(16),
             text("무료 요금제는 하루 1건이라 실제로는 못 씁니다. Premium 요금제 가입 필요 (1건당 110원).\n" +
                 "1. SK open API(openapi.sk.com) 회원 가입 → 로그인\n" +

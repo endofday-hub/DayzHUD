@@ -17,6 +17,8 @@ data class HudSettings(
     val clock: Boolean = true, // 재설치하면 설정이 초기화되므로 기본 켬
     val autoBrightness: Boolean = true,
     val brightness: Int = 255,
+    val kakaoTalk: Boolean = true, // 카톡·문자 알림을 HUD에 (알림 접근 필요)
+    val sms: Boolean = true,
 ) {
     fun save(p: SharedPreferences) = p.edit()
         .putInt("theme", theme).putInt("navTheme", navTheme)
@@ -25,6 +27,7 @@ data class HudSettings(
         .putBoolean("showSpeed", showSpeed).putBoolean("speedGauge", speedGauge)
         .putInt("speedColor", speedColor).putBoolean("clock", clock)
         .putBoolean("autoBrightness", autoBrightness).putInt("brightness", brightness)
+        .putBoolean("kakaoTalk", kakaoTalk).putBoolean("sms", sms)
         .apply()
 
     companion object {
@@ -46,6 +49,8 @@ data class HudSettings(
                 clock = p.getBoolean("clock", clock),
                 autoBrightness = p.getBoolean("autoBrightness", autoBrightness),
                 brightness = p.getInt("brightness", brightness),
+                kakaoTalk = p.getBoolean("kakaoTalk", kakaoTalk),
+                sms = p.getBoolean("sms", sms),
             )
         }
     }

@@ -6,6 +6,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
@@ -16,6 +17,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.service.notification.NotificationListenerService
 import android.util.Log
 import kotlin.math.roundToInt
 
@@ -60,6 +62,8 @@ class HudService : Service() {
                 .requestLocationUpdates(LocationManager.GPS_PROVIDER, 1_000L, 0f, gps, Looper.getMainLooper())
         } else log("위치 권한 없음 — GPS 속도 미표시")
         kivic.connect()
+        // 알림 리스너가 허용돼 있어도 재설치 뒤엔 안 붙어 있을 수 있음 (네이버 안내·카톡·문자 못 받음). 허용 안 됐으면 무시됨
+        runCatching { NotificationListenerService.requestRebind(ComponentName(this, NavNotificationListener::class.java)) }
         // TMAP 인증은 하루 한도(약 20건)가 있다 → 기본 내비가 TMAP일 때만 자동 연동. 그 외엔 메인 화면 "TMAP 연동" 버튼으로
         if (MainActivity.navApp(getSharedPreferences("hud", MODE_PRIVATE)).second == MainActivity.TMAP) tmap.start()
         return START_STICKY

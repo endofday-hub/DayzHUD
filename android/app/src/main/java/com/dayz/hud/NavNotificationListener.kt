@@ -2,6 +2,7 @@ package com.dayz.hud
 
 import android.app.Notification
 import android.app.UiModeManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Bitmap
@@ -10,6 +11,7 @@ import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.Icon
 import android.os.Bundle
+import android.provider.Telephony
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.view.View
@@ -44,8 +46,21 @@ class NavNotificationListener : NotificationListenerService() {
     private var lastTbt: Tbt? = null
     private val unknownIcons = HashSet<String>()
 
+    // 재설치·프로세스 종료 뒤 허용은 남아도 연결(live)이 안 돌아오는 경우가 있다 (HyperOS) → 끊기면 다시 요청
+    override fun onListenerConnected() { live = true }
+
+    override fun onListenerDisconnected() {
+        live = false
+        requestRebind(ComponentName(this, javaClass))
+    }
+
+    companion object {
+        @Volatile var live = false // 메인 화면 '알림 접근' 상태 표시용
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         if (sbn.packageName == NaverMapping.PKG) naver(sbn)
+        message(sbn)
         val n = sbn.notification
         if (sbn.packageName !in TARGETS && (n.flags and Notification.FLAG_ONGOING_EVENT) == 0) return
 
@@ -83,6 +98,27 @@ class NavNotificationListener : NotificationListenerService() {
         }
         naverKey = sbn.key
         send(NaverMapping.toTbt(distance, car.getCharSequence("content_text")?.toString().orEmpty(), icon))
+    }
+
+    // 카톡·문자 → HUD 알림 (카톡 아이콘·문자 아이콘은 HUD가 그림). 같은 대화는 같은 key로 내용만 바뀌어 다시 온다
+    private val lastMsg = HashMap<String, String>()
+
+    private fun message(sbn: StatusBarNotification) {
+        val n = sbn.notification
+        if (n.flags and (Notification.FLAG_GROUP_SUMMARY or Notification.FLAG_ONGOING_EVENT) != 0) return
+        val kakao = sbn.packageName == "com.kakao.talk"
+        if (!kakao && sbn.packageName != Telephony.Sms.getDefaultSmsPackage(this)) return
+        val s = HudSettings.load(getSharedPreferences("hud", MODE_PRIVATE))
+        if (!(if (kakao) s.kakaoTalk else s.sms)) return
+        val who = n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: return
+        val text = n.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: return
+        if (lastMsg.put(sbn.key, text) == text) return
+        val hud = HudService.instance ?: return
+        HudService.log("HUD 알림: ${if (kakao) "카톡" else "문자"} $who") // 내용은 로그에 안 남김
+        // 원본 앱과 같게: 카톡은 "보낸 사람 : 내용" 한 줄, 문자는 제목·내용 따로
+        hud.kivic.sendFrames(listOf(
+            if (kakao) KivicPacket.social(KivicPacket.KAKAO, "", "$who : $text") else KivicPacket.social(KivicPacket.SMS, who, text),
+        ))
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
