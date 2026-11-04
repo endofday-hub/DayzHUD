@@ -9,6 +9,11 @@ HUD가 화살표·숫자를 직접 그리므로, 앱은 회전 종류·거리·�
 [카카오내비 SDK] ── 앱 안 길안내 ────┘        └─▶ Android Auto 차량 화면 (카카오 지도)
 ```
 
+| 메인 화면 | HUD 화면 설정 | 카카오 길안내 검색 |
+|:---:|:---:|:---:|
+| <img src="docs/images/main.png" width="260"> | <img src="docs/images/hud-settings.png" width="260"> | <img src="docs/images/kakao-search.png" width="260"> |
+| 연결 상태, 내비 연동, 자동 실행 | 테마·크기·키스톤·속도·밝기, 카톡·문자 알림 | 목적지 검색, ☆로 즐겨찾기 고정 |
+
 ## 기능
 
 | 내비 | 방식 | HUD에 나오는 것 | 조건 |
