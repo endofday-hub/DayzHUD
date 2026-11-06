@@ -41,6 +41,7 @@ HUD가 화살표·숫자를 직접 그리므로, 앱은 회전 종류·거리·�
 - (선택) Android Auto 차량. 차량 화면은 **Play 스토어에서 설치한 앱**에만 나와요 (Play Console 내부 테스트).
   - Android Auto 17.7부터는 APK로 직접 설치한 지도 앱을 '알 수 없는 출처'를 켜도 차량 앱 목록에서 숨깁니다. HUD 표시는 APK로도 됩니다.
   - PC의 DHU(Desktop Head Unit)는 이 검사를 건너뛰어서 APK로도 보여요.
+  - 차량 화면이 필요하면 **endofday@gmail.com** 으로 Play 스토어에 쓰는 Gmail 주소를 보내 주세요. 테스터로 추가해 드려요.
 
 ## 빌드·설치
 
