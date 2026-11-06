@@ -16,6 +16,7 @@ object NaverMapping {
         "e7772f0f7e8f" to 18,  // 2시 방향
         "93c1500859ed" to 118, // 왼쪽 주행 → 왼쪽 도로 (Kivic 순회에서 표시 확인된 코드)
         "cc2fb1699896" to 201, // 도착지 주변
+        "153699ab97a7" to 11,  // 관문(IC·지하차도 입구 모양) 아래 직진 화살표 → 직진 (실차 2026-11-05, "시흥IC, 오류IC" 방면)
     )
 
     fun turnCode(iconHash: String?): Int? = TURN[iconHash]

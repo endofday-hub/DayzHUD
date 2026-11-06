@@ -111,7 +111,13 @@ K0 실측 (2026-10-30)
 
 #### Android Auto 출력 (K1 안정화 후)
 DayzHUD를 Car App Library 내비 앱(`androidx.car.app.category.NAVIGATION`)으로 등록. KNSDK 안내 값을 그대로 쓴다.
-설치: Play 미배포 → 폰 AA 개발자 설정 "알 수 없는 출처" 허용. 시험: DHU (`instrumentcluster = true`로 계기판까지)
+설치: Play Console 내부 테스트로 배포 (2026-11-06 v0.1.2).
+- AA 17.7+는 사이드로드한 템플릿 앱을 "알 수 없는 출처"를 켜도 거부해요. logcat에 `CAR.VALIDATOR: Package DENIED`가 남아요.
+- 같은 앱을 Play에서 설치하니 A90 런처 목록에 나왔어요.
+- 카카오 키 해시는 Play 서명 키 값과 디버그 키 값 2개를 모두 등록해 둬요.
+- 릴리스 AAB: `android/keystore.properties`(gitignore)와 `upload.jks`를 써서 secrets 없는 깨끗한 worktree에서 `./gradlew bundleRelease`로 만들어요.
+
+시험: DHU (`instrumentcluster = true`로 계기판까지). DHU는 설치 출처 검사를 건너뛰어서, 실차 노출은 확인하지 못해요.
 
 | 단계 | 내용 | 완료 기준 |
 |---|---|---|

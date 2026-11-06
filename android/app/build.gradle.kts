@@ -13,20 +13,33 @@ val secrets = Properties().apply {
 
 android {
     namespace = "com.dayz.hud"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.dayz.hud"
         minSdk = 29 // MediaStore.Downloads
-        targetSdk = 35
-        versionCode = 2
-        versionName = "0.1.1"
+        targetSdk = 36
+        versionCode = 3
+        versionName = "0.1.2"
 
         for (key in listOf("TMAP_CLIENT_ID", "TMAP_API_KEY", "TMAP_USER_KEY", "TMAP_DEVICE_KEY", "KAKAO_APP_KEY")) {
             buildConfigField("String", key, "\"${secrets.getProperty(key, "").trim()}\"")
         }
         // 카카오내비 SDK 네이티브 라이브러리 (폰은 arm)
         ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a") }
+    }
+
+    // Play 업로드 키: android/keystore.properties (storeFile, storePassword, keyAlias, keyPassword). git에 안 올라감
+    val ks = rootProject.file("keystore.properties").takeIf { it.exists() }
+        ?.let { f -> Properties().apply { f.inputStream().use { load(it) } } }
+    if (ks != null) {
+        signingConfigs.create("release") {
+            storeFile = rootProject.file(ks.getProperty("storeFile"))
+            storePassword = ks.getProperty("storePassword")
+            keyAlias = ks.getProperty("keyAlias")
+            keyPassword = ks.getProperty("keyPassword")
+        }
+        buildTypes.getByName("release").signingConfig = signingConfigs.getByName("release")
     }
 
     buildFeatures { buildConfig = true }

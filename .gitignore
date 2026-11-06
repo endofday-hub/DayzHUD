@@ -6,3 +6,5 @@ secrets.properties
 *.iml
 .pio/
 hud-dump/
+keystore.properties
+*.jks
