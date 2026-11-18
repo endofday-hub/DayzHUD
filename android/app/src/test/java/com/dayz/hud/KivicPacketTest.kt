@@ -20,11 +20,11 @@ class KivicPacketTest {
     @Test
     fun settingsFrames() {
         val frames = KivicPacket.settings(HudSettings(theme = 1, keystone = 0.1f)).map { it.hex() }
-        assertEquals(17, frames.size) // 자동 밝기면 수동 밝기 패킷 생략
+        assertEquals(18, frames.size) // 자동 밝기면 수동 밝기 패킷 생략
         assertEquals("02 7D 7F 09 0B 00 00 00 01 03", frames[0])
         // KeyStone: p1 = 0x03 → 7D 7E, payload float 0.1f = 3D CC CC CD
         assertEquals("02 7D 7F 7D 7E 00 3D CC CC CD 03", frames[3])
-        assertEquals(18, KivicPacket.settings(HudSettings(autoBrightness = false)).size)
+        assertEquals(19, KivicPacket.settings(HudSettings(autoBrightness = false)).size)
         // 카톡 항목(9,8): 켜짐, 글자색 FFFAE100, 아이콘 6, 패키지 1개 "com.kivic.kakaotalk"
         assertTrue(frames[14].startsWith("02 7D 7F 09 08 01 FF FA E1 00 00 00 00 06 00 00 00 01 00 13 "))
         // SystemTime(2,1,0): p1 0x01 그대로, payload는 long 시각 + utf 타임존
@@ -36,6 +36,8 @@ class KivicPacketTest {
         // command 1 (0x01 그대로), p1 4: utf 패키지명 + u16 길이·UTF-8 제목 + u16 길이·UTF-8 내용 ("가" = EA B0 80)
         val f = KivicPacket.social("a", "", "가")
         assertEquals("02 01 04 00 00 01 61 00 00 00 7D 7E EA B0 80 03", f.hex())
+        // 음악: p1 12 (0x0C), 패키지 com.kivic.music
+        assertTrue(KivicPacket.music("곡", "가수").hex().startsWith("02 01 0C 00 00 0F "))
     }
 
     @Test

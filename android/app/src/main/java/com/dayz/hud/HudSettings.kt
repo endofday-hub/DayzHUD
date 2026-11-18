@@ -19,6 +19,7 @@ data class HudSettings(
     val brightness: Int = 255,
     val kakaoTalk: Boolean = true, // 카톡·문자 알림을 HUD에 (알림 접근 필요)
     val sms: Boolean = true,
+    val music: Boolean = true, // 재생 중인 곡 제목·가수 (음악 앱 재생 알림에서)
 ) {
     fun save(p: SharedPreferences) = p.edit()
         .putInt("theme", theme).putInt("navTheme", navTheme)
@@ -27,7 +28,7 @@ data class HudSettings(
         .putBoolean("showSpeed", showSpeed).putBoolean("speedGauge", speedGauge)
         .putInt("speedColor", speedColor).putBoolean("clock", clock)
         .putBoolean("autoBrightness", autoBrightness).putInt("brightness", brightness)
-        .putBoolean("kakaoTalk", kakaoTalk).putBoolean("sms", sms)
+        .putBoolean("kakaoTalk", kakaoTalk).putBoolean("sms", sms).putBoolean("music", music)
         .apply()
 
     companion object {
@@ -51,6 +52,7 @@ data class HudSettings(
                 brightness = p.getInt("brightness", brightness),
                 kakaoTalk = p.getBoolean("kakaoTalk", kakaoTalk),
                 sms = p.getBoolean("sms", sms),
+                music = p.getBoolean("music", music),
             )
         }
     }

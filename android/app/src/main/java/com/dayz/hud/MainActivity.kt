@@ -76,7 +76,7 @@ class MainActivity : Activity() {
             } else stopService(Intent(this, HudService::class.java))
         }
         notiHelp = column(
-            text("네이버지도 안내·카톡·문자를 받으려면 알림 접근을 허용하세요.\n" +
+            text("네이버지도 안내·카톡·문자·음악 제목을 받으려면 알림 접근을 허용하세요.\n" +
                 "DayzHUD가 회색이면: 설정 > 앱 > DayzHUD > ⋮ > '제한된 설정 허용'\n" +
                 "허용했는데 '연결 안 됨'이면 (샤오미): '자동 시작 설정'에서 DayzHUD 켜기", 13f, SUB),
             row(
@@ -248,6 +248,7 @@ class MainActivity : Activity() {
             // 알림 접근 허용이 있어야 읽힘. 카톡 알림 미리보기를 끄면 내용 대신 '새 메시지'만 옴
             toggle("카톡 알림 표시", hud.kakaoTalk) { update { copy(kakaoTalk = it) } },
             toggle("문자 알림 표시", hud.sms) { update { copy(sms = it) } },
+            toggle("재생 중인 음악 제목 표시", hud.music) { update { copy(music = it) } },
             outlineButton("설정 다시 전송") { kivic?.sendFrames(KivicPacket.settings(hud)) ?: log("먼저 HUD 연결") }.spaced(16),
         )
     }
@@ -299,7 +300,8 @@ class MainActivity : Activity() {
                 "2. 내비 고르기 — TMAP: TMAP 앱 안내를 받아 옴 (유료 API 키 필요) / 네이버지도: Android Auto 연결 중 자동 / 카카오: '카카오 길안내'로 앱 안에서 안내, 차에선 Android Auto의 DayzHUD\n" +
                 "3. 즐겨찾기: 카카오 길안내 검색 화면에서 ☆를 누르면 맨 위에 고정 (차량 목록에도 ★로 표시)\n" +
                 "4. '앱 실행 시 자동 실행'으로 평소 쓰는 내비를 고르면 앱을 열 때 HUD 연결과 함께 실행\n" +
-                "5. 카톡·문자 알림: 알림 접근을 허용하면 HUD에 10초 표시 ('HUD 화면'에서 끄기). 카톡 미리보기를 끄면 내용은 안 나옴", 13f, SUB),
+                "5. 카톡·문자 알림: 알림 접근을 허용하면 HUD에 10초 표시 ('HUD 화면'에서 끄기). 카톡 미리보기를 끄면 내용은 안 나옴\n" +
+                "6. 음악 제목: 음악 앱에서 곡이 바뀌면 곡·가수를 HUD에 10초 표시 ('HUD 화면'에서 끄기)", 13f, SUB),
             text("TMAP API 키 (EDC)", 14f, ACCENT, bold = true).spaced(16),
             text("무료 요금제는 하루 1건이라 실제로는 못 씁니다. Premium 요금제 가입 필요 (1건당 110원).\n" +
                 "1. SK open API(openapi.sk.com) 회원 가입 → 로그인\n" +

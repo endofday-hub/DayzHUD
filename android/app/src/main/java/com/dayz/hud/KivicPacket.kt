@@ -89,24 +89,32 @@ object KivicPacket {
         command(2, 1, payload { writeBoolean(s.autoBrightness) }),
         if (s.autoBrightness) null else command(2, 5, payload { writeInt(s.brightness) }),
         // 알림: 표시 켜기(9,7) → 항목 초기화(9,6) → 항목별 설정(9,8: 켜짐, 글자색, 아이콘, 패키지명 목록) → 표시 시간(9,1 초)
-        command(9, 7, payload { writeBoolean(s.kakaoTalk || s.sms) }),
+        command(9, 7, payload { writeBoolean(s.kakaoTalk || s.sms || s.music) }),
         command(9, 6),
         notiItem(s.kakaoTalk, KAKAO_TEXT, 6, KAKAO),
         notiItem(s.sms, HudSettings.WHITE, 2, SMS),
+        notiItem(s.music, MUSIC_TEXT, 3, MUSIC),
         command(9, 1, payload { writeInt(10) }),
     )
 
     // HUD 펌웨어가 아는 패키지명 (실제 앱 패키지가 아님). 아이콘은 HUD가 그린다
     const val KAKAO = "com.kivic.kakaotalk"
     const val SMS = "com.kivic.sms"
+    const val MUSIC = "com.kivic.music"
     private const val KAKAO_TEXT = -335616 // 원본 앱의 카톡 글자색 (노랑)
+    private const val MUSIC_TEXT = -12996114 // 공식 SDK 음악 기본 글자색 (하늘색), 아이콘 3
 
     private fun notiItem(on: Boolean, color: Int, icon: Int, pkg: String) = command(9, 8, payload {
         writeBoolean(on); writeInt(color); writeInt(icon); writeInt(1); writeUTF(pkg)
     })
 
     // 소셜 알림 (command 1, 4). 제목·내용은 writeUTF가 아니라 u16 길이 + UTF-8 바이트 (원본 NotificationPacket 그대로)
-    fun social(pkg: String, title: String, message: String) = frame(1, 4, 0, payload {
+    fun social(pkg: String, title: String, message: String) = notification(4, pkg, title, message)
+
+    // 음악 알림 (command 1, 12): 소셜과 같은 형식, 제목 = 곡, 내용 = 가수 (공식 SDK MusicNotificationPacket)
+    fun music(track: String, artist: String) = notification(12, MUSIC, track, artist)
+
+    private fun notification(kind: Int, pkg: String, title: String, message: String) = frame(1, kind, 0, payload {
         writeUTF(pkg)
         for (t in listOf(title, message)) t.toByteArray().let { writeShort(it.size); write(it) }
     })

@@ -10,6 +10,10 @@ import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.Icon
+import android.media.MediaMetadata
+import android.media.session.MediaController
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
 import android.os.Bundle
 import android.provider.Telephony
 import android.service.notification.NotificationListenerService
@@ -61,6 +65,7 @@ class NavNotificationListener : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         if (sbn.packageName == NaverMapping.PKG) naver(sbn)
         message(sbn)
+        music(sbn)
         val n = sbn.notification
         if (sbn.packageName !in TARGETS && (n.flags and Notification.FLAG_ONGOING_EVENT) == 0) return
 
@@ -119,6 +124,30 @@ class NavNotificationListener : NotificationListenerService() {
         hud.kivic.sendFrames(listOf(
             if (kakao) KivicPacket.social(KivicPacket.KAKAO, "", "$who : $text") else KivicPacket.social(KivicPacket.SMS, who, text),
         ))
+    }
+
+    // 음악 앱 재생 알림(미디어 세션이 붙은 알림) → 곡이 바뀔 때 HUD에 "곡 / 가수" (음악 아이콘은 HUD가 그림)
+    // 재생·일시정지 때마다 같은 곡으로 다시 오므로 곡이 바뀔 때만. 멈춘 상태의 알림은 무시
+    private var lastTrack = ""
+
+    @Suppress("DEPRECATION")
+    private fun music(sbn: StatusBarNotification) {
+        val n = sbn.notification
+        val token = n.extras.getParcelable<MediaSession.Token>(Notification.EXTRA_MEDIA_SESSION) ?: return
+        val c = runCatching { MediaController(this, token) }.getOrNull() ?: return
+        if (c.playbackState?.state != PlaybackState.STATE_PLAYING) return
+        // 곡 정보는 세션 메타데이터가 정확함 (없으면 알림 글자)
+        val meta = c.metadata
+        val track = (meta?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()).orEmpty().trim()
+        if (track.isEmpty()) return
+        val artist = (meta?.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: n.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()).orEmpty().trim()
+        val key = "$track\t$artist"
+        if (key == lastTrack) return
+        lastTrack = key
+        if (!HudSettings.load(getSharedPreferences("hud", MODE_PRIVATE)).music) return
+        val hud = HudService.instance ?: return
+        HudService.log("HUD 음악: $track")
+        hud.kivic.sendFrames(listOf(KivicPacket.music(track, artist)))
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
