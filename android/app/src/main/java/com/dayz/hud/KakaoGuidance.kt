@@ -3,6 +3,9 @@ package com.dayz.hud
 import android.app.Application
 import android.content.Context
 import android.graphics.Bitmap
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
 import com.kakaomobility.knsdk.KNLanguageType
@@ -58,7 +61,31 @@ object KakaoGuidance :
     var view: KNNaviView? = null // 폰 안내 화면 (없으면 null)
 
     private val main = Handler(Looper.getMainLooper())
+    private var app: Application? = null
     private var ready = false
+    private var lastVia: Place? = null // 재탐색 때 아직 안 지난 경유지 유지
+
+    // SDK 기본은 음악 채널(USAGE_MEDIA) → 차에서 음악과 같은 볼륨·같이 나옴.
+    // 내비 안내 채널로 바꾸면 차의 내비 볼륨으로 따로 조절되고, 재생 동안 음악을 줄여 달라고(duck) 요청
+    private val NAV_AUDIO = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
+    private val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK).setAudioAttributes(NAV_AUDIO).build()
+
+    init {
+        KNGuide_Voice.Companion.setUsage(NAV_AUDIO.usage)
+        KNGuide_Voice.Companion.setContentType(NAV_AUDIO.contentType)
+    }
+
+    // 안내 음성 크기 (내비 볼륨 안에서 비율). 차량 화면 옵션에서 크게·중간·작게
+    var volume: Float
+        get() = app?.getSharedPreferences("hud", Context.MODE_PRIVATE)?.getFloat("voiceVolume", 1f) ?: 1f
+        set(v) { app?.getSharedPreferences("hud", Context.MODE_PRIVATE)?.edit()?.putFloat("voiceVolume", v)?.apply() }
+
+    // 안내 음성 동안 음악 소리 줄이기 (차량 화면 옵션, 기본 켜짐)
+    var duck: Boolean
+        get() = app?.getSharedPreferences("hud", Context.MODE_PRIVATE)?.getBoolean("voiceDuck", true) ?: true
+        set(v) { app?.getSharedPreferences("hud", Context.MODE_PRIVATE)?.edit()?.putBoolean("voiceDuck", v)?.apply() }
     private var guidance: KNGuidance? = null
     private var destination = ""
     private var lastTo: Place? = null // 재탐색용
@@ -71,6 +98,7 @@ object KakaoGuidance :
     val active get() = guidance != null
 
     fun init(app: Application, done: (KNError?) -> Unit) {
+        this.app = app
         if (ready) return done(null)
         KNSDK.install(app, "${app.filesDir}/knsdk")
         KNSDK.initializeWithAppKey(
@@ -98,17 +126,36 @@ object KakaoGuidance :
         }
     }
 
-    // 현재 위치 → to 경로 탐색 후 안내 시작. view가 있으면 그 화면에 붙인다
-    fun start(to: Place, simul: Boolean, done: (String?) -> Unit = {}) {
+    // 지금 자리 근처 검색 (주유소·편의점 등), 가까운 순. 주소 앞에 직선거리
+    fun nearby(q: String, done: (List<Place>) -> Unit) {
+        val here = state?.pos ?: KNSDK.sharedGpsManager()?.lastValidGpsData?.pos?.let { FloatPoint(it.x.toFloat(), it.y.toFloat()) }
+            ?: return done(emptyList())
+        search(q) { list ->
+            done(list.map { it to Math.hypot((it.x - here.x).toDouble(), (it.y - here.y).toDouble()).toInt() } // KATEC = 미터
+                .sortedBy { it.second }
+                .map { (p, d) -> p.copy(address = "${if (d < 1000) "${d}m" else "%.1fkm".format(d / 1000.0)} · ${p.address}") })
+        }
+    }
+
+    // 안내 중이면 지금 목적지 앞에 경유지로 넣어 다시 탐색, 아니면 그곳으로 바로 안내
+    fun addVia(p: Place, done: (String?) -> Unit) {
+        val to = lastTo
+        if (to == null || !active) start(p, lastSimul, done = done) else start(to, lastSimul, p, done)
+    }
+
+    // 현재 위치 → (via 거쳐) to 경로 탐색 후 안내 시작. view가 있으면 그 화면에 붙인다
+    fun start(to: Place, simul: Boolean, via: Place? = null, done: (String?) -> Unit = {}) {
         // 안내 중이면 경로 위 지금 자리에서 (모의주행 재탐색도 그 자리에서 이어짐)
         val (hx, hy) = state?.pos?.let { it.x.toInt() to it.y.toInt() }
             ?: KNSDK.sharedGpsManager()?.lastValidGpsData?.pos?.let { it.x.toInt() to it.y.toInt() } ?: return done("현재 위치 없음 (GPS 대기)")
         lastTo = to
         lastSimul = simul
-        log("카카오 경로 탐색 → ${to.name}")
+        lastVia = via
+        log("카카오 경로 탐색 → ${to.name}${via?.let { " (경유 ${it.name})" } ?: ""}")
         val start = KNPOI("현위치", hx, hy, null)
         val dest = KNPOI(to.name, to.x, to.y, null)
-        KNSDK.makeTripWithStart(start, dest, null, null) { err, trip ->
+        val vias = via?.let { mutableListOf(KNPOI(it.name, it.x, it.y, null)) }
+        KNSDK.makeTripWithStart(start, dest, vias, null) { err, trip ->
             if (err != null || trip == null) {
                 main.post { done(fail("경로 생성", err)) }
                 return@makeTripWithStart
@@ -142,7 +189,11 @@ object KakaoGuidance :
     }
 
     // 같은 목적지로 지금 자리에서 다시 탐색
-    fun reroute(done: (String?) -> Unit) = lastTo?.let { start(it, lastSimul, done) } ?: done("재탐색할 목적지 없음")
+    fun reroute(done: (String?) -> Unit) {
+        val to = lastTo ?: return done("재탐색할 목적지 없음")
+        val via = lastVia?.takeIf { guidance?.trip?.passedVias().isNullOrEmpty() } // 이미 지난 경유지는 빼고
+        start(to, lastSimul, via, done)
+    }
 
     fun stop() {
         val g = guidance ?: return
@@ -151,8 +202,11 @@ object KakaoGuidance :
         end()
     }
 
+    private fun audio() = app?.getSystemService(AudioManager::class.java)
+
     private fun end() {
         guidance = null
+        audio()?.abandonAudioFocusRequest(focus) // 음성 도중 끝나도 음악 볼륨 되돌림
         state = null
         send(TmapMapping.ENDED)
         listeners.forEach { it() }
@@ -254,10 +308,20 @@ object KakaoGuidance :
     override fun guidanceDidUpdateAroundSafeties(g: KNGuidance, s: List<KNSafety>?) { view?.guidanceDidUpdateAroundSafeties(g, s) }
 
     // 폰 화면이 없으면 SDK가 알아서 음성 안내
-    override fun shouldPlayVoiceGuide(g: KNGuidance, v: KNGuide_Voice, data: MutableList<ByteArray>) =
-        view?.shouldPlayVoiceGuide(g, v, data) ?: true
+    override fun shouldPlayVoiceGuide(g: KNGuidance, v: KNGuide_Voice, data: MutableList<ByteArray>): Boolean {
+        val play = view?.shouldPlayVoiceGuide(g, v, data) ?: true
+        v.setVolume(volume)
+        return play
+    }
 
-    override fun willPlayVoiceGuide(g: KNGuidance, v: KNGuide_Voice) { view?.willPlayVoiceGuide(g, v) }
-    override fun didFinishPlayVoiceGuide(g: KNGuidance, v: KNGuide_Voice) { view?.didFinishPlayVoiceGuide(g, v) }
+    override fun willPlayVoiceGuide(g: KNGuidance, v: KNGuide_Voice) {
+        view?.willPlayVoiceGuide(g, v)
+        if (duck) audio()?.requestAudioFocus(focus)
+    }
+
+    override fun didFinishPlayVoiceGuide(g: KNGuidance, v: KNGuide_Voice) {
+        view?.didFinishPlayVoiceGuide(g, v)
+        audio()?.abandonAudioFocusRequest(focus)
+    }
     override fun didUpdateCitsGuide(g: KNGuidance, c: KNGuide_Cits) { view?.didUpdateCitsGuide(g, c) }
 }

@@ -37,6 +37,7 @@ import androidx.car.app.model.CarIcon
 import androidx.car.app.model.DateTimeWithZone
 import androidx.car.app.model.Distance
 import androidx.car.app.model.ItemList
+import androidx.car.app.model.ListTemplate
 import androidx.car.app.model.Row
 import androidx.car.app.model.SearchTemplate
 import androidx.car.app.model.Template
@@ -117,6 +118,7 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
         // 지도 쪽 PAN 버튼이 있어야 지도가 터치를 받고, 그래야 숨은 오른쪽 위 버튼이 터치로 다시 나온다
         // PAN 버튼은 setPanModeListener가 있어야 보이고, 이동 모드에서만 onScroll이 온다 (나갈 땐 그 자리 유지, ◎로 복귀)
         val strip = ActionStrip.Builder()
+            .addAction(Action.Builder().setTitle("옵션").setOnClickListener { screenManager.push(OptionsScreen(carContext)) }.build())
             .addAction(Action.Builder().setTitle("재탐색").setOnClickListener {
                 KakaoGuidance.reroute { e -> if (e != null) CarToast.makeText(carContext, e, CarToast.LENGTH_LONG).show() }
             }.build())
@@ -135,8 +137,6 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
         val prefs = carContext.getSharedPreferences("hud", Context.MODE_PRIVATE)
         val list = ItemList.Builder()
             .addItem(Row.Builder().setTitle("목적지 검색").setBrowsable(true).setOnClickListener { screenManager.push(SearchScreen(carContext) { simul }) }.build())
-            .addItem(Row.Builder().setTitle(if (simul) "모의주행: 켜짐" else "모의주행: 꺼짐").addText("PC 시험용 (DHU)").setBrowsable(true)
-                .setOnClickListener { simul = !simul; invalidate() }.build())
         val limit = carContext.getCarService(ConstraintManager::class.java).getContentLimit(ConstraintManager.CONTENT_LIMIT_TYPE_LIST)
         // 즐겨찾기(폰 검색 화면에서 ★로 고정)가 최근 목적지보다 위
         val fav = Favorites.load(prefs)
@@ -144,6 +144,9 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
             Row.Builder().setTitle(if (fav.any(p::same)) "★ ${p.name}" else p.name).addText(p.address.ifEmpty { " " }).setBrowsable(true)
                 .setOnClickListener { startFromCar(carContext, screenManager, p, simul) }.build(),
         )
+        // 시험용이라 맨 아래
+        list.addItem(Row.Builder().setTitle(if (simul) "모의주행: 켜짐" else "모의주행: 꺼짐").addText("PC 시험용 (DHU)").setBrowsable(true)
+            .setOnClickListener { simul = !simul; invalidate() }.build())
         return PlaceListNavigationTemplate.Builder().setTitle("DayzHUD 카카오 길안내").setItemList(list.build()).setMapActionStrip(mapButtons()).setPanModeListener { }.build()
     }
 
@@ -306,13 +309,12 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
             canvas.restore()
         }
         panelOverlay?.let { b ->
-            // 카드가 DHU보다 좁으면(보이는 영역 왼쪽 = 카드 폭 + 여백) 같이 줄이고, 화면 아래로 넘치면 더 줄임 (키우진 않음)
-            val v = visible
-            val k = if (v != null && v.left > CARD_W / 2) ((v.left - 2 * CARD_LEFT) / CARD_W).coerceIn(0.5f, 1f) else 1f
-            val top = CARD_TOP * k
-            val s = minOf(k, ((v?.bottom ?: surfaceSize.second) - top) / b.height).coerceAtLeast(0.5f)
+            // 지도에서 카드에 안 가리는 영역(보이는 영역)의 왼쪽 아래. 카드 밑에 두면 실차에선 아래 도착 시간 카드와 겹쳤음
+            // 좁거나 낮은 화면이면 줄이기만 함 (높이는 보이는 영역의 40%까지 — 내 차는 3/4 지점)
+            val v = visible ?: Rect(0, 0, surfaceSize.first, surfaceSize.second)
+            val s = minOf(1f, (v.width() - 2 * PANEL_MARGIN) / b.width, v.height() * 0.4f / b.height).coerceAtLeast(0.5f)
             canvas.save()
-            canvas.translate(CARD_LEFT, top)
+            canvas.translate(v.left + PANEL_MARGIN, v.bottom - PANEL_MARGIN - b.height * s)
             canvas.scale(s, s)
             canvas.drawBitmap(b, 0f, 0f, carPaint)
             canvas.restore()
@@ -353,10 +355,8 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
     // ponytail: 지도 회전 부드러움은 감으로 정함 — 길이 비스듬히 오래 남으면 줄이고, 지도가 출렁이면 늘림
     private val CAM_TAU = 600f // ms. 지도 방향이 길 방향을 따라가는 시간 상수 (꼭짓점마다 꺾이는 걸 부드럽게)
     private val ARROW_TAU = 150f // ms. 내 차 화살표
-    // ponytail: 정보 자리는 DHU(1190x700, 분할 화면) 실측값. 회전 카드(차로·다음 안내 포함) 바로 아래. 다른 화면은 카드 폭·바닥에 맞춰 줄이기만 함 (compose) — 카드 높이가 크게 다르면 보이는 영역 로그 보고 CARD_TOP 조정
-    private val CARD_LEFT = 12f
-    private val CARD_W = 318
-    private val CARD_TOP = 240f
+    private val PANEL_MARGIN = 12f
+    private val CARD_W = 318 // 정보판 폭 (DHU 회전 카드 폭)
     private val PASSED_GRAY = 0xFF8A8F98.toInt()
     // ponytail: 경로선 굵기(theme.lineWidth)와 폴리라인 굵기 단위가 달라 배율로 맞춤. DHU 실측: 파란 선(테두리 포함) 15px, 1배 ≈ 4.8px → 3배
     private val PASSED_WIDTH = 3f
@@ -392,6 +392,8 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
     private var interval = ANIM_MS.toFloat() // 위치 갱신 간격 (평균)
     private var animMs = ANIM_MS
     private var heading: Float? = null // 내 차 자리의 길 방향 (북 0, 시계 방향)
+    private var moving = true
+    private val MOVING_KMH = 5
     private var carAngle = 0f
     private var camBearing = 0f
     private var lastFrameAt = 0L
@@ -434,6 +436,8 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
                 FloatPoint(p.x.toFloat(), p.y.toFloat())
             }
         }
+        // 정차 중엔 위치가 제자리에서 앞뒤로 흔들려 길 방향이 뒤집힘 → 움직일 때만 방향을 바꿈 (안내 없으면 1초에 5m 이상)
+        moving = s?.tbt?.speed?.let { it >= MOVING_KMH } ?: (Math.hypot((pos.x - here.x).toDouble(), (pos.y - here.y).toDouble()) >= 5.0)
         val prev = lastLoc
         // ponytail: polyIdx가 routePolylineWGS84 순번과 같다고 봄 (SDK 내부 점 배열을 그대로 풀어 놓은 것). 어긋나면 가장 가까운 꼭짓점 찾기로
         val ahead = if (prev != null && loc != null && loc.polyIdx >= prev.polyIdx) {
@@ -453,7 +457,7 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
         startedAt = now
         settled = false
         updateCard(m, s)
-        if (++ticks % 10 == 1) HudService.log("차량 지도 zoom=${m.zoom} 구간=${animMs}ms 차 화면=${drawn?.let(m::katecToScreen)?.let { "${it.x},${it.y}" }} anchor=${anchor().let { "${it.x * surfaceSize.first},${it.y * surfaceSize.second}" }} bearing=${m.bearing}/$camBearing 길=$heading")
+        if (++ticks % 10 == 1) HudService.log("차량 지도 zoom=${m.zoom} 구간=${animMs}ms 차 화면=${drawn?.let(m::katecToScreen)?.let { "${it.x},${it.y}" }} anchor=${anchor().let { "${it.x * surfaceSize.first},${it.y * surfaceSize.second}" }} bearing=${m.bearing}/$camBearing 길=$heading 회색=${passed.size}점/${passedLine != null}")
     }
 
     // 매 프레임: 이번 구간 길을 따라 내 차·회색 꼬리·카메라를 옮김 (다 가고 방향도 다 맞으면 멈춤)
@@ -474,7 +478,7 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
         } else tailLine?.let(m::removePolyline).also { tailLine = null }
         val h = CarPath.heading(xy, upto)
         if (h != null && heading == null) { camBearing = h; carAngle = h } // 처음엔 바로 맞춤
-        if (h != null) heading = h
+        if (h != null && moving) heading = h
         val want = heading ?: camBearing
         camBearing = CarPath.lerpAngle(camBearing, want, 1 - exp(-dt / CAM_TAU))
         carAngle = CarPath.lerpAngle(carAngle, want, 1 - exp(-dt / ARROW_TAU))
@@ -831,5 +835,44 @@ class SearchScreen(ctx: CarContext, private val simul: () -> Boolean) : Screen(c
         if (loading) b.setLoading(true)
         else results?.let { r -> b.setItemList(placeList(carContext, r, "검색 결과 없음") { startFromCar(carContext, screenManager, it, simul()) }) }
         return b.build()
+    }
+}
+
+// ── 주행 중 옵션: 안내 음성 크기, 주변 주유소·편의점 (고르면 경유지로) ──
+class OptionsScreen(ctx: CarContext) : Screen(ctx) {
+    private val levels = listOf("크게" to 1f, "중간" to 0.6f, "작게" to 0.3f)
+
+    override fun onGetTemplate(): Template {
+        val list = ItemList.Builder()
+        val cur = KakaoGuidance.volume
+        for ((name, v) in levels) list.addItem(
+            Row.Builder().setTitle("안내 음성 $name${if (abs(cur - v) < 0.01f) "  ✓" else ""}")
+                .setOnClickListener { KakaoGuidance.volume = v; invalidate() }.build(),
+        )
+        list.addItem(
+            Row.Builder().setTitle("음성 나올 때 음악 줄이기: ${if (KakaoGuidance.duck) "켜짐" else "꺼짐"}")
+                .setOnClickListener { KakaoGuidance.duck = !KakaoGuidance.duck; invalidate() }.build(),
+        )
+        for (q in listOf("주유소", "편의점")) list.addItem(
+            Row.Builder().setTitle("가까운 $q").setBrowsable(true).setOnClickListener { screenManager.push(NearbyScreen(carContext, q)) }.build(),
+        )
+        return ListTemplate.Builder().setTitle("옵션").setHeaderAction(Action.BACK).setSingleList(list.build()).build()
+    }
+}
+
+class NearbyScreen(ctx: CarContext, private val q: String) : Screen(ctx) {
+    private var results: List<Place>? = null
+
+    init {
+        KakaoGuidance.nearby(q) { results = it; invalidate() }
+    }
+
+    override fun onGetTemplate(): Template {
+        val b = ListTemplate.Builder().setTitle("가까운 $q").setHeaderAction(Action.BACK)
+        val r = results ?: return b.setLoading(true).build()
+        return b.setSingleList(placeList(carContext, r, "근처에 $q 없음") { p ->
+            KakaoGuidance.addVia(p) { e -> CarToast.makeText(carContext, e ?: "경유지: ${p.name}", CarToast.LENGTH_LONG).show() }
+            screenManager.popToRoot()
+        }).build()
     }
 }
