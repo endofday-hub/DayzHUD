@@ -62,7 +62,9 @@ data class HudSettings(
 object ApiKeys {
     const val TMAP = "tmapApiKey"
     const val KAKAO = "kakaoAppKey"
+    const val OPINET = "opinetKey"
 
     fun tmap(p: SharedPreferences) = p.getString(TMAP, null)?.trim()?.ifEmpty { null } ?: BuildConfig.TMAP_API_KEY
     fun kakao(p: SharedPreferences) = p.getString(KAKAO, null)?.trim()?.ifEmpty { null } ?: BuildConfig.KAKAO_APP_KEY
+    fun opinet(p: SharedPreferences) = p.getString(OPINET, null)?.trim()?.ifEmpty { null } ?: BuildConfig.OPINET_API_KEY
 }

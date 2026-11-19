@@ -67,6 +67,7 @@ import com.kakaomobility.knsdk.map.uicustomsupport.renewal.KNMapPolyline
 import com.kakaomobility.knsdk.map.uicustomsupport.renewal.theme.base.KNMapTheme
 import com.kakaomobility.knsdk.trip.kntrip.knroute.KNRoute
 import java.util.TimeZone
+import kotlin.concurrent.thread
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -82,6 +83,17 @@ class HudCarAppService : CarAppService() {
     override fun createHostValidator() = HostValidator.ALLOW_ALL_HOSTS_VALIDATOR
 
     override fun onCreateSession() = object : Session() {
+        init {
+            // 차량 연결이 끊기면 안내도 끝냄 — 도착 뒤 안내가 안 끝나고 남으면 SDK가 계속 돌 수 있음 (11/18 밤 데이터 5.8GB 의심)
+            lifecycle.addObserver(object : DefaultLifecycleObserver {
+                override fun onDestroy(owner: LifecycleOwner) {
+                    if (KakaoGuidance.state == null) return
+                    HudService.log("차량 연결 끊김 → 안내 종료")
+                    KakaoGuidance.stop()
+                }
+            })
+        }
+
         override fun onCreateScreen(intent: Intent): Screen = NavScreen(carContext)
     }
 }
@@ -297,7 +309,7 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
         compose.stop()
     }
 
-    // 지도 그림 위에 내 차(카메라가 늘 anchor 자리에 맞춤 → 그 화면 좌표)와 정보판(회전 카드 바로 아래)을 얹어 차량 화면으로
+    // 지도 그림 위에 내 차(카메라가 늘 anchor 자리에 맞춤 → 그 화면 좌표)와 정보판(보이는 영역 오른쪽 위)을 얹어 차량 화면으로
     private val compose = CarCompositor { canvas ->
         carRot?.let { r ->
             val a = anchor()
@@ -308,13 +320,15 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
             canvas.drawBitmap(carBmp, -CAR_SIZE / 2f, -CAR_SIZE / 2f, carPaint)
             canvas.restore()
         }
+        // 주유소 가격 표지 (내 차보다 아래에 깔리게 먼저). 끝이 주유소 자리를 가리킴
+        for ((x, y, b) in stationPx) canvas.drawBitmap(b, x - b.width / 2f, y - b.height, carPaint)
         panelOverlay?.let { b ->
-            // 지도에서 카드에 안 가리는 영역(보이는 영역)의 왼쪽 아래. 카드 밑에 두면 실차에선 아래 도착 시간 카드와 겹쳤음
-            // 좁거나 낮은 화면이면 줄이기만 함 (높이는 보이는 영역의 40%까지 — 내 차는 3/4 지점)
+            // 보이는 영역(카드·버튼에 안 가리는 지도)의 오른쪽 위. 왼쪽 아래는 실차에서 시간 카드·내 차와 겹쳤음
+            // 좁거나 낮은 화면이면 줄이기만 함: 폭은 오른쪽 절반, 높이는 내 차(3/4 지점)에 안 닿게 60%까지
             val v = visible ?: Rect(0, 0, surfaceSize.first, surfaceSize.second)
-            val s = minOf(1f, (v.width() - 2 * PANEL_MARGIN) / b.width, v.height() * 0.4f / b.height).coerceAtLeast(0.5f)
+            val s = minOf(1f, (v.width() / 2f - PANEL_MARGIN) / b.width, v.height() * 0.6f / b.height).coerceAtLeast(0.5f)
             canvas.save()
-            canvas.translate(v.left + PANEL_MARGIN, v.bottom - PANEL_MARGIN - b.height * s)
+            canvas.translate(v.right - PANEL_MARGIN - b.width * s, v.top + PANEL_MARGIN)
             canvas.scale(s, s)
             canvas.drawBitmap(b, 0f, 0f, carPaint)
             canvas.restore()
@@ -356,7 +370,7 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
     private val CAM_TAU = 600f // ms. 지도 방향이 길 방향을 따라가는 시간 상수 (꼭짓점마다 꺾이는 걸 부드럽게)
     private val ARROW_TAU = 150f // ms. 내 차 화살표
     private val PANEL_MARGIN = 12f
-    private val CARD_W = 318 // 정보판 폭 (DHU 회전 카드 폭)
+    private val PANEL_W = 270 // 정보판 폭 (글줄 "신호·과속 카메라 137m"이 들어가게)
     private val PASSED_GRAY = 0xFF8A8F98.toInt()
     // ponytail: 경로선 굵기(theme.lineWidth)와 폴리라인 굵기 단위가 달라 배율로 맞춤. DHU 실측: 파란 선(테두리 포함) 15px, 1배 ≈ 4.8px → 3배
     private val PASSED_WIDTH = 3f
@@ -457,6 +471,7 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
         startedAt = now
         settled = false
         updateCard(m, s)
+        fuelStations(pos)
         if (++ticks % 10 == 1) HudService.log("차량 지도 zoom=${m.zoom} 구간=${animMs}ms 차 화면=${drawn?.let(m::katecToScreen)?.let { "${it.x},${it.y}" }} anchor=${anchor().let { "${it.x * surfaceSize.first},${it.y * surfaceSize.second}" }} bearing=${m.bearing}/$camBearing 길=$heading 회색=${passed.size}점/${passedLine != null}")
     }
 
@@ -488,6 +503,11 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
         m.moveCamera(cam, false, false)
         carRot = CarPath.turn(camBearing, carAngle)
         carPx = if (free != null) m.katecToScreen(p).let { it.x to it.y } else null
+        // 카메라를 옮긴 이 프레임 기준 화면 자리 (지도 마커는 카메라와 다른 프레임에 반영돼 떨림 → 정보판처럼 합성)
+        stationPx = stations.mapNotNull { (st, b) ->
+            val q = m.katecToScreen(FloatPoint(st.x.toFloat(), st.y.toFloat()))
+            if (q.x < 0 || q.y < 0 || q.x > surfaceSize.first || q.y > surfaceSize.second) null else Triple(q.x, q.y, b)
+        }
         settled = f >= 1f && abs(CarPath.turn(camBearing, want)) < 0.3f && abs(CarPath.turn(carAngle, want)) < 0.3f
     }
 
@@ -511,47 +531,113 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
         cardKey = key
     }
 
-    // 회전 카드와 같은 폭, 바탕 없음: 위 [속도][제한속도 표지], 아래 글줄
+    // 오른쪽 위에 붙는 정보판, 바탕 없음: 오른쪽 열에 속도 → 그 아래 제한속도 표지, 맨 아래 글줄(오른쪽 맞춤)
     private fun panelBitmap(speed: Int, t: Tbt?, ev: KakaoGuidance.RoadEvent?): Bitmap {
         val lines = buildList {
             if (t != null) add("${KakaoNaviMapping.sdiLabel(t.safeCode)} ${meters(t.safeDistance)}" to 0xFFFFC107.toInt())
             if (t != null && t.block && t.blockSpeed > 0) add("구간 평균 ${t.blockSpeed}km/h" to Color.WHITE)
             if (ev != null) add("${ev.title} ${meters(ev.distance)}" to 0xFFFF8A65.toInt())
         }
-        val w = CARD_W
-        val h = 112 + lines.size * 36 + (if (lines.isEmpty()) 0 else 8)
+        val limit = t?.safeSpeedLimit ?: 0
+        val w = PANEL_W
+        val cx = w - 62f // 속도·표지 열 가운데
+        val top = if (limit > 0) 206 else 108 // 속도(108) + 표지(98)
+        val h = top + lines.size * 36 + (if (lines.isEmpty()) 0 else 8)
         return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also {
             val c = Canvas(it)
             val fill = Paint(Paint.ANTI_ALIAS_FLAG)
             // 바탕이 없으니 지도 위에서도 읽히게 글자에 그림자
             val mid = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; isFakeBoldText = true; setShadowLayer(6f, 0f, 2f, Color.BLACK) }
-            val limit = t?.safeSpeedLimit ?: 0
             // 현재 속도 (제한속도 넘으면 빨강)
             mid.color = if (limit > 0 && speed > limit) 0xFFFF5252.toInt() else Color.WHITE
             mid.textSize = 64f
-            c.drawText("$speed", 76f, 74f, mid)
+            c.drawText("$speed", cx, 64f, mid)
             mid.color = 0xFFB0B4BC.toInt()
             mid.textSize = 20f
-            c.drawText("km/h", 76f, 100f, mid)
-            // 제한속도 표지 (빨간 테두리 흰 원)
+            c.drawText("km/h", cx, 90f, mid)
+            // 제한속도 표지 (빨간 테두리 흰 원), 속도 바로 아래
             if (limit > 0) {
-                c.drawCircle(220f, 56f, 44f, Paint(fill).apply { color = Color.WHITE })
-                c.drawCircle(220f, 56f, 38f, Paint(fill).apply { color = 0xFFE53935.toInt(); style = Paint.Style.STROKE; strokeWidth = 10f })
+                c.drawCircle(cx, 154f, 44f, Paint(fill).apply { color = Color.WHITE })
+                c.drawCircle(cx, 154f, 38f, Paint(fill).apply { color = 0xFFE53935.toInt(); style = Paint.Style.STROKE; strokeWidth = 10f })
                 mid.color = Color.BLACK
                 mid.textSize = 38f
-                c.drawText("$limit", 220f, 70f, mid)
+                c.drawText("$limit", cx, 168f, mid)
             }
-            // 글줄: 카메라·주의 지점, 구간 평균, 돌발
-            val left = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 24f; isFakeBoldText = true; setShadowLayer(6f, 0f, 2f, Color.BLACK) }
-            var y = 112f + 26f
+            // 글줄: 카메라·주의 지점, 구간 평균, 돌발 (오른쪽 끝에 맞춤)
+            val right = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 24f; isFakeBoldText = true; textAlign = Paint.Align.RIGHT; setShadowLayer(6f, 0f, 2f, Color.BLACK) }
+            val end = w - 8f
+            var y = top + 26f
             for ((i, line) in lines.withIndex()) {
-                var x = 18f
-                // 돌발은 SDK 아이콘을 앞에
-                if (ev != null && i == lines.lastIndex) ev.icon?.let { ic -> c.drawBitmap(ic, null, RectF(x, y - 24f, x + 30f, y + 6f), null); x += 36f }
-                left.color = line.second
-                c.drawText(fit(line.first, left, w - x - 14f), x, y, left)
+                // 돌발은 SDK 아이콘을 글 앞에
+                val icon = if (ev != null && i == lines.lastIndex) ev.icon else null
+                right.color = line.second
+                val text = fit(line.first, right, end - 8f - (if (icon != null) 36f else 0f))
+                c.drawText(text, end, y, right)
+                if (icon != null) {
+                    val x = end - right.measureText(text) - 36f
+                    c.drawBitmap(icon, null, RectF(x, y - 24f, x + 30f, y + 6f), null)
+                }
                 y += 36f
             }
+        }
+    }
+
+    // ── 주유소 가격 (오피넷): 옵션에서 유종을 고르고 키가 있을 때만. 반경 3km를 받아 두고 1.5km 움직이거나 10분 지나면 다시 ──
+    private var stations: List<Pair<Opinet.Station, Bitmap>> = emptyList()
+    @Volatile private var stationPx: List<Triple<Float, Float, Bitmap>> = emptyList()
+    private var fetchAt: FloatPoint? = null
+    private var fetchFuel = ""
+    private var fetchedAt = 0L
+    private var fetching = false
+
+    private fun fuelStations(pos: FloatPoint) {
+        val prefs = carContext.getSharedPreferences("hud", Context.MODE_PRIVATE)
+        val fuel = Opinet.fuel(prefs)
+        val key = ApiKeys.opinet(prefs)
+        if (fuel.isEmpty() || key.isEmpty()) {
+            if (stations.isNotEmpty()) { stations = emptyList(); stationPx = emptyList(); fetchAt = null }
+            return
+        }
+        val at = fetchAt
+        val near = at != null && Math.hypot((pos.x - at.x).toDouble(), (pos.y - at.y).toDouble()) < 1_500
+        if (fetching || (fuel == fetchFuel && near && SystemClock.uptimeMillis() - fetchedAt < 600_000)) return
+        fetching = true
+        // 실패해도 자리·시각은 남겨 1.5km/10분 전엔 다시 안 부름 (하루 호출 한도)
+        fetchAt = pos
+        fetchFuel = fuel
+        fetchedAt = SystemClock.uptimeMillis()
+        thread {
+            val r = runCatching { Opinet.around(key, pos.x.toDouble(), pos.y.toDouble(), fuel) }
+            frames.post {
+                fetching = false
+                r.onFailure { HudService.log("주유소 가격 실패: $it") }.onSuccess { list ->
+                    HudService.log("주유소 가격 ${Opinet.fuelName(fuel)} ${list.size}곳")
+                    stations = list.map { it to stationBadge(it) }
+                    settled = false // 다음 프레임에 화면 자리 계산
+                }
+            }
+        }
+    }
+
+    // [브랜드 글자 | 가격] 둥근 표지 + 아래 꼭지 (꼭지 끝 = 주유소 자리)
+    private fun stationBadge(st: Opinet.Station): Bitmap {
+        val (label, color) = Opinet.badge(st.brand)
+        val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 22f; isFakeBoldText = true; this.color = Color.WHITE }
+        val price = "%,d".format(st.price)
+        val lw = txt.measureText(label) + 16f
+        val w = (lw + txt.measureText(price) + 16f).toInt()
+        val h = 34
+        val tip = 8
+        return Bitmap.createBitmap(w, h + tip, Bitmap.Config.ARGB_8888).also {
+            val c = Canvas(it)
+            val p = Paint(Paint.ANTI_ALIAS_FLAG)
+            c.drawRoundRect(RectF(0f, 0f, w.toFloat(), h.toFloat()), 10f, 10f, p.apply { this.color = 0xE6202329.toInt() })
+            c.drawPath(Path().apply { moveTo(w / 2f - 7, h.toFloat()); lineTo(w / 2f, (h + tip).toFloat()); lineTo(w / 2f + 7, h.toFloat()); close() }, p)
+            c.drawRoundRect(RectF(0f, 0f, lw, h.toFloat()), 10f, 10f, p.apply { this.color = color })
+            txt.color = if (st.brand == "SOL") Color.BLACK else Color.WHITE // 노란 바탕엔 검은 글자
+            c.drawText(label, 8f, 25f, txt)
+            txt.color = Color.WHITE
+            c.drawText(price, lw + 8f, 25f, txt)
         }
     }
 
@@ -844,14 +930,23 @@ class OptionsScreen(ctx: CarContext) : Screen(ctx) {
 
     override fun onGetTemplate(): Template {
         val list = ItemList.Builder()
-        val cur = KakaoGuidance.volume
-        for ((name, v) in levels) list.addItem(
-            Row.Builder().setTitle("안내 음성 $name${if (abs(cur - v) < 0.01f) "  ✓" else ""}")
-                .setOnClickListener { KakaoGuidance.volume = v; invalidate() }.build(),
+        // 차량 목록은 6줄까지만 보장 → 음성 크기는 한 줄에서 눌러 크게→중간→작게 순환
+        val cur = levels.indexOfFirst { abs(KakaoGuidance.volume - it.second) < 0.01f }.coerceAtLeast(0)
+        list.addItem(
+            Row.Builder().setTitle("안내 음성: ${levels[cur].first}").addText("누르면 크게 → 중간 → 작게")
+                .setOnClickListener { KakaoGuidance.volume = levels[(cur + 1) % levels.size].second; invalidate() }.build(),
         )
         list.addItem(
             Row.Builder().setTitle("음성 나올 때 음악 줄이기: ${if (KakaoGuidance.duck) "켜짐" else "꺼짐"}")
                 .setOnClickListener { KakaoGuidance.duck = !KakaoGuidance.duck; invalidate() }.build(),
+        )
+        // 지도에 주유소 가격: 끔 → 휘발유 → 경유
+        val prefs = carContext.getSharedPreferences("hud", Context.MODE_PRIVATE)
+        val fuel = Opinet.FUELS.indexOfFirst { it.first == Opinet.fuel(prefs) }.coerceAtLeast(0)
+        list.addItem(
+            Row.Builder().setTitle("지도에 주유소 가격: ${Opinet.FUELS[fuel].second}")
+                .addText(if (ApiKeys.opinet(prefs).isEmpty()) "폰 앱 API 키 화면에 오피넷 키 입력 필요" else "누르면 끔 → 휘발유 → 경유")
+                .setOnClickListener { prefs.edit().putString(Opinet.FUEL, Opinet.FUELS[(fuel + 1) % Opinet.FUELS.size].first).apply(); invalidate() }.build(),
         )
         for (q in listOf("주유소", "편의점")) list.addItem(
             Row.Builder().setTitle("가까운 $q").setBrowsable(true).setOnClickListener { screenManager.push(NearbyScreen(carContext, q)) }.build(),

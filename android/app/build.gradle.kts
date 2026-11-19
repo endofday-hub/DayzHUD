@@ -22,7 +22,7 @@ android {
         versionCode = 4
         versionName = "0.1.3"
 
-        for (key in listOf("TMAP_CLIENT_ID", "TMAP_API_KEY", "TMAP_USER_KEY", "TMAP_DEVICE_KEY", "KAKAO_APP_KEY")) {
+        for (key in listOf("TMAP_CLIENT_ID", "TMAP_API_KEY", "TMAP_USER_KEY", "TMAP_DEVICE_KEY", "KAKAO_APP_KEY", "OPINET_API_KEY")) {
             buildConfigField("String", key, "\"${secrets.getProperty(key, "").trim()}\"")
         }
         // 카카오내비 SDK 네이티브 라이브러리 (폰은 arm)
@@ -60,4 +60,5 @@ dependencies {
     implementation("androidx.databinding:viewbinding:8.7.3") // KNSDK 화면이 쓰는데 의존성에 없음
     implementation("androidx.car.app:app:1.4.0") // Android Auto (CarNav.kt)
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303") // 단위 테스트에서 Android org.json은 빈 껍데기
 }

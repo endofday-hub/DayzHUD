@@ -266,12 +266,19 @@ class MainActivity : Activity() {
     private fun keysSection(): List<View> {
         val tmap = keyInput(ApiKeys.TMAP, BuildConfig.TMAP_API_KEY)
         val kakao = keyInput(ApiKeys.KAKAO, BuildConfig.KAKAO_APP_KEY)
+        val opinet = keyInput(ApiKeys.OPINET, BuildConfig.OPINET_API_KEY)
+        val fuel = Opinet.FUELS.indexOfFirst { it.first == Opinet.fuel(prefs) }.coerceAtLeast(0)
         return listOf(
-            text("비워 두면 빌드 때 넣은 키(secrets.properties)를 씁니다.", 13f, SUB),
+            // Play 빌드는 secrets.properties 없이 만들어서 빌드 키가 비어 있음
+            text(if (BuildConfig.TMAP_API_KEY.isEmpty() && BuildConfig.KAKAO_APP_KEY.isEmpty()) "TMAP·카카오 키를 입력해야 합니다."
+                else "비워 두면 빌드 때 넣은 키(secrets.properties)를 씁니다.", 13f, SUB),
             field("TMAP API 키 (appKey)", tmap),
             field("카카오 네이티브 앱 키", kakao),
+            field("오피넷 유가정보 키 (Android Auto 지도에 주유소 가격)", opinet),
+            field("주유소 가격 유종", segments(Opinet.FUELS.map { it.second }, fuel) { prefs.edit().putString(Opinet.FUEL, Opinet.FUELS[it].first).apply() }),
             button("저장") {
-                prefs.edit().putString(ApiKeys.TMAP, tmap.text.toString().trim()).putString(ApiKeys.KAKAO, kakao.text.toString().trim()).apply()
+                prefs.edit().putString(ApiKeys.TMAP, tmap.text.toString().trim()).putString(ApiKeys.KAKAO, kakao.text.toString().trim())
+                    .putString(ApiKeys.OPINET, opinet.text.toString().trim()).apply()
                 // TMAP은 바로 다시 인증. 카카오 SDK는 한 번 초기화되면 키를 못 바꿈 → 앱을 다시 시작해야
                 HudService.instance?.tmap?.run { if (state != TmapSource.State.OFF) { stop(); start() } }
                 toast("저장함. 카카오 키는 앱을 완전히 닫고 다시 열면 적용")
