@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.location.Location
+import android.net.TrafficStats
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
@@ -19,6 +20,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.service.notification.NotificationListenerService
 import android.util.Log
+import java.io.File
 import kotlin.math.roundToInt
 
 // HUD 연결과 TMAP 수신을 화면과 분리해 유지한다 (화면 회전·앱 전환·화면 꺼짐에도 끊기지 않게).
@@ -66,7 +68,34 @@ class HudService : Service() {
         runCatching { NotificationListenerService.requestRebind(ComponentName(this, NavNotificationListener::class.java)) }
         // TMAP 인증은 하루 한도(약 20건)가 있다 → 기본 내비가 TMAP일 때만 자동 연동. 그 외엔 메인 화면 "TMAP 연동" 버튼으로
         if (MainActivity.navApp(getSharedPreferences("hud", MODE_PRIVATE)).second == MainActivity.TMAP) tmap.start()
+        main.removeCallbacks(dataWatch)
+        main.postDelayed(dataWatch, 60_000)
         return START_STICKY
+    }
+
+    // 데이터 감시: 11/18 밤 차 안 쓰는 동안 18시간에 5.8GB를 올려 보냄 (원인 SDK 미확정, 로그는 재시작으로 사라짐)
+    // 1분에 1MB 넘게 쓰면 그때 상태와 소켓에 쓰는 중인 스레드 스택을 dump/data.log에 남김 (adb pull로 가져감)
+    private var lastTx = -1L
+    private var lastRx = -1L
+    private val dataWatch = object : Runnable {
+        override fun run() {
+            val uid = android.os.Process.myUid()
+            val tx = TrafficStats.getUidTxBytes(uid)
+            val rx = TrafficStats.getUidRxBytes(uid)
+            if (lastTx >= 0 && tx - lastTx + rx - lastRx > 1_000_000) {
+                val msg = "데이터 많음: 1분 보내기 ${(tx - lastTx) / 1024}KB 받기 ${(rx - lastRx) / 1024}KB 안내=${KakaoGuidance.state != null} TMAP=${tmap.state}"
+                log(msg)
+                runCatching {
+                    val busy = Thread.getAllStackTraces().filter { (_, st) -> st.any { "Socket" in it.className || "okhttp" in it.className || "ssl" in it.className.lowercase() } }
+                    File(dumpDir(this@HudService), "data.log").appendText(
+                        "${java.util.Date()} $msg\n" + busy.entries.joinToString("") { (t, st) -> "  [${t.name}]\n" + st.take(25).joinToString("") { "    $it\n" } },
+                    )
+                }
+            }
+            lastTx = tx
+            lastRx = rx
+            main.postDelayed(this, 60_000)
+        }
     }
 
     // 네이버 알림엔 속도가 없어 폰 GPS 속도를 쓴다. 3초 넘게 신호 없으면(터널 등) 0
@@ -88,6 +117,7 @@ class HudService : Service() {
     }
 
     override fun onDestroy() {
+        main.removeCallbacks(dataWatch)
         getSystemService(LocationManager::class.java).removeUpdates(gps)
         instance = null
         tmap.stop()
