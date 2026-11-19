@@ -19,8 +19,8 @@ android {
         applicationId = "com.dayz.hud"
         minSdk = 29 // MediaStore.Downloads
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.1.3"
+        versionCode = 5
+        versionName = "0.1.4"
 
         for (key in listOf("TMAP_CLIENT_ID", "TMAP_API_KEY", "TMAP_USER_KEY", "TMAP_DEVICE_KEY", "KAKAO_APP_KEY", "OPINET_API_KEY")) {
             buildConfigField("String", key, "\"${secrets.getProperty(key, "").trim()}\"")
