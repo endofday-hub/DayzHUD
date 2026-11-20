@@ -98,12 +98,27 @@ class NavNotificationListener : NotificationListenerService() {
         val car = sbn.notification.extras.getBundle(NaverMapping.CAR_EXTENSIONS) ?: return
         val distance = car.getCharSequence("content_title")?.toString() ?: return
         val icon = (car.getParcelable<Bitmap>("large_bitmap"))?.let { iconHash(png(it)) }
-        if (icon != null && NaverMapping.turnCode(icon) == null && unknownIcons.add(icon)) {
+        val limit = NaverMapping.speedLimit(icon)
+        if (icon != null && limit == null && NaverMapping.turnCode(icon) == null && unknownIcons.add(icon)) {
             HudService.log("네이버 새 회전 아이콘 $icon — NaverMapping.TURN에 추가 필요")
         }
         naverKey = sbn.key
-        send(NaverMapping.toTbt(distance, car.getCharSequence("content_text")?.toString().orEmpty(), icon))
+        // 제한속도 표지는 회전을 덮어쓰지 않고 카메라 정보로: 회전 화살표가 번갈아 사라지지 않게
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (limit != null) {
+            naverCam = limit to NaverMapping.parseDistance(distance)
+            naverCamAt = now
+        } else {
+            naverTurn = NaverMapping.toTbt(distance, car.getCharSequence("content_text")?.toString().orEmpty(), icon)
+        }
+        val turn = naverTurn ?: Tbt()
+        val cam = naverCam?.takeIf { now - naverCamAt < 6_000 } // 표지가 안 오면 6초 뒤 카메라 표시 끔
+        send(if (cam != null) NaverMapping.withCamera(turn, cam.first, cam.second) else turn)
     }
+
+    private var naverTurn: Tbt? = null
+    private var naverCam: Pair<Int, Int>? = null // 제한속도, 거리
+    private var naverCamAt = 0L
 
     // 카톡·문자 → HUD 알림 (카톡 아이콘·문자 아이콘은 HUD가 그림). 같은 대화는 같은 key로 내용만 바뀌어 다시 온다
     private val lastMsg = HashMap<String, String>()
@@ -153,6 +168,8 @@ class NavNotificationListener : NotificationListenerService() {
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
         if (sbn.key != naverKey) return
         naverKey = null
+        naverTurn = null
+        naverCam = null
         send(TmapMapping.ENDED) // 안내 종료 → HUD 화면 정리
     }
 

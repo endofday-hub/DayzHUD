@@ -22,4 +22,19 @@ class NaverMappingTest {
         assertEquals("강서농수산물도매시장", t.turnName)
         assertEquals(0, NaverMapping.toTbt("50m", "", "unknown").turnCode)
     }
+
+    @Test
+    fun speedSignIsCameraNotTurn() {
+        // 실차 2026-11-20: 제한속도 50 표지가 "부천, 발산역" 고가 옆길 안내와 번갈아 옴
+        assertEquals(null, NaverMapping.turnCode("6752f66291ee"))
+        assertEquals(50, NaverMapping.speedLimit("6752f66291ee"))
+        val turn = NaverMapping.toTbt("4.2km", "부천, 발산역", "d39f02eb6b52")
+        assertEquals(124, turn.turnCode)
+        val t = NaverMapping.withCamera(turn, 50, NaverMapping.parseDistance("589m"))
+        assertEquals(124, t.turnCode) // 회전은 그대로
+        assertEquals(4200, t.turnDistance)
+        assertEquals(true, t.safe)
+        assertEquals(50, t.safeSpeedLimit)
+        assertEquals(589, t.safeDistance)
+    }
 }
