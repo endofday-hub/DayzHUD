@@ -55,9 +55,13 @@ class KivicLink(
     }
 
     // TMAP 콜백 등 아무 스레드에서 불러도 된다
+    var lastTbt: Tbt? = null // 마지막으로 보낸 안내 (HudService가 안내 없을 때 속도만 보낼지 판단)
+        private set
+
     fun sendTbt(t: Tbt) {
         main.post {
             if (!ready) return@post log("HUD 미연결")
+            lastTbt = t
             log("TBT code=${t.turnCode} ${t.turnDistance}m display=${t.naviDisplayStatus} status=${t.naviStatus}" +
                 if (t.lane) " lane=${t.laneTurnInfo} etc=${t.laneEtc} ok=${t.laneAvailable} ${t.laneDistance}m" else "")
             send(KivicPacket.tbt(t))

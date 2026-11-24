@@ -74,4 +74,50 @@ class KakaoNaviMappingTest {
         assertEquals(true, section.block)
         assertEquals(92, section.blockSpeed)
     }
+
+    @Test
+    fun routeSummaryText() {
+        assertEquals("1시간 20분 · 95.3km · 통행료 3,400원", KakaoNaviMapping.routeSummary(4_800, 95_300, 3_400))
+        assertEquals("12분 · 850m · 무료", KakaoNaviMapping.routeSummary(700, 850, 0))
+    }
+
+    @Test
+    fun safeDriveKeepsOnlySpeedAndCamera() {
+        val t = KakaoNaviMapping.safeTbt(KakaoNaviMapping.Guide(
+            rg = 0, turnDistance = 0, name = "", remainDistance = 0, remainSeconds = 0, speed = 72,
+            safety = KakaoNaviMapping.Safety("KNSafetyCode_SpeedViolationCamera", 420, speedLimit = 60),
+        ))
+        assertEquals(0, t.turnCode)
+        assertEquals(0, t.totalDistance)
+        assertEquals(72, t.speed)
+        assertEquals(true, t.safe)
+        assertEquals(1, t.safeCode)
+        assertEquals(420, t.safeDistance)
+        assertEquals(60, t.safeSpeedLimit)
+    }
+
+    @Test
+    fun sectionShownAllTheWay() {
+        // 구간 끝 카메라가 1km보다 멀어도 (안전 정보는 범위 밖) 구간 내내 단속중·평균 속도
+        val far = KakaoNaviMapping.Safety("KNSafetyCode_SpeedViolationSectionOutCamera", 5_200, speedLimit = 100)
+        val t = KakaoNaviMapping.toTbt(KakaoNaviMapping.Guide(
+            rg = 0, turnDistance = 1, name = "", remainDistance = 1, remainSeconds = 1, speed = 95,
+            safety = far, section = KakaoNaviMapping.Section(avgSpeed = 97, remain = 5_200, speedLimit = 100),
+        ))
+        assertEquals(true, t.safe)
+        assertEquals(4, t.safeCode)
+        assertEquals(100, t.safeSpeedLimit)
+        assertEquals(true, t.block)
+        assertEquals(97, t.blockSpeed)
+        assertEquals(5_200, t.blockDistance)
+        // 끝 카메라가 가까우면 그 카메라를 보이고 단속중은 그대로
+        val near = KakaoNaviMapping.toTbt(KakaoNaviMapping.Guide(
+            rg = 0, turnDistance = 1, name = "", remainDistance = 1, remainSeconds = 1, speed = 95,
+            safety = KakaoNaviMapping.Safety("KNSafetyCode_SpeedViolationSectionOutCamera", 600, speedLimit = 100),
+            section = KakaoNaviMapping.Section(avgSpeed = 97, remain = 600, speedLimit = 100),
+        ))
+        assertEquals(3, near.safeCode)
+        assertEquals(true, near.block)
+        assertEquals(97, near.blockSpeed)
+    }
 }

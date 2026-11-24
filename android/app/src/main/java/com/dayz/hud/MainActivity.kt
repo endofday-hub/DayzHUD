@@ -118,8 +118,19 @@ class MainActivity : Activity() {
                 // 카카오내비 SDK: 목적지 검색 → 앱 안에서 길안내 (모의주행은 시험용)
                 row(
                     outlineButton("카카오 길안내") { kakaoNavi(simul = false) },
+                    outlineButton("안전운행") {
+                        startActivity(Intent(this, KakaoNaviActivity::class.java).putExtra(KakaoNaviActivity.EXTRA_SAFE, true))
+                    },
                     outlineButton("모의주행") { kakaoNavi(simul = true) },
                 ),
+                // 안전운행 = 목적지 없이 과속 카메라·구간단속·교통 정보만 (HUD·차량 화면)
+                toggle("목적지 고르면 경로 선택 (끄면 바로 안내)", prefs.getBoolean(KakaoGuidance.ROUTE_PICK, true)) {
+                    prefs.edit().putBoolean(KakaoGuidance.ROUTE_PICK, it).apply()
+                },
+                toggle("최소 안내 (회전 안내 음성 줄이기)", prefs.getBoolean(KakaoGuidance.MINIMAL, false)) {
+                    prefs.edit().putBoolean(KakaoGuidance.MINIMAL, it).apply()
+                    KakaoGuidance.applyFreq() // 안내 중이면 바로
+                },
                 field("앱 실행 시 자동 실행", segments(NAV_APPS.map { it.first }, NAV_APPS.indexOf(navApp(prefs))) {
                     prefs.edit().putInt("navApp", it).apply()
                 }),

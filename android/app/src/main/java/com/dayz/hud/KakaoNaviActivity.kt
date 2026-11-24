@@ -32,7 +32,8 @@ class KakaoNaviActivity : AppCompatActivity() {
         KakaoGuidance.init(application) { err ->
             if (err != null) return@init HudService.log("카카오 초기화 실패: ${err.code} ${err.msg}")
             val x = intent.getIntExtra(EXTRA_X, 0)
-            if (x != 0) navigate(Place(intent.getStringExtra(EXTRA_NAME).orEmpty(), x, intent.getIntExtra(EXTRA_Y, 0)))
+            if (intent.getBooleanExtra(EXTRA_SAFE, false)) showNavi { KakaoGuidance.safeDrive() }
+            else if (x != 0) navigate(Place(intent.getStringExtra(EXTRA_NAME).orEmpty(), x, intent.getIntExtra(EXTRA_Y, 0)))
             else showSearch()
         }
     }
@@ -107,7 +108,7 @@ class KakaoNaviActivity : AppCompatActivity() {
             setPadding(0, dp(12), 0, dp(12))
             setOnClickListener {
                 Recents.remember(prefs, p)
-                navigate(p)
+                if (KakaoGuidance.routePick) choose(p) else navigate(p) // 메인 화면 설정
             }
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         addView(label("", 24f, 0).apply {
@@ -134,7 +135,32 @@ class KakaoNaviActivity : AppCompatActivity() {
 
     private val simul get() = intent.getBooleanExtra(EXTRA_SIMUL, false)
 
-    private fun navigate(dest: Place) {
+    // 경로 선택: 종류별 시간·거리·통행료를 보여 주고 고른 것으로 출발
+    private fun choose(p: Place) {
+        currentFocus?.let { getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(it.windowToken, 0) }
+        val wait = AlertDialog.Builder(this).setMessage("${p.name}\n경로 찾는 중…").setCancelable(true).show()
+        KakaoGuidance.plan(p) { list, err ->
+            if (!wait.isShowing) return@plan // 기다리다 취소함
+            wait.dismiss()
+            if (isFinishing) return@plan
+            if (err != null) return@plan Toast.makeText(this, err, Toast.LENGTH_LONG).show()
+            AlertDialog.Builder(this)
+                .setTitle("${p.name} 가는 방법")
+                .setItems(list.map { "${it.label}\n${KakaoNaviMapping.routeSummary(it.route.totalTime, it.route.totalDist, it.route.totalCost)}" }.toTypedArray()) { _, i ->
+                    navigate(p, list[i])
+                }
+                .setNegativeButton("취소", null)
+                .show()
+        }
+    }
+
+    private fun navigate(dest: Place, choice: KakaoGuidance.RouteChoice? = null) = showNavi {
+        if (choice != null) KakaoGuidance.go(choice, simul)
+        else KakaoGuidance.start(dest, simul) { err -> if (err != null) Toast.makeText(this, err, Toast.LENGTH_LONG).show() }
+    }
+
+    // SDK 안내 화면을 띄우고 start로 안내(또는 안전운행)를 시작
+    private fun showNavi(start: () -> Unit) {
         currentFocus?.let { getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(it.windowToken, 0) }
         val v = KNNaviView(this)
         // SDK 화면이 안내 끝(도착·SDK 종료 버튼)을 알려 주면 화면 닫기 (onDestroy에서 안내 정리)
@@ -158,7 +184,7 @@ class KakaoNaviActivity : AppCompatActivity() {
                 setPadding(dp(16), dp(10), dp(16), dp(10))
                 setOnClickListener {
                     AlertDialog.Builder(this@KakaoNaviActivity)
-                        .setMessage(if (simul) "모의주행을 끝낼까요?" else "길안내를 끝낼까요?")
+                        .setMessage(if (KakaoGuidance.safeMode) "안전운행을 끝낼까요?" else if (simul) "모의주행을 끝낼까요?" else "길안내를 끝낼까요?")
                         .setPositiveButton("종료") { _, _ -> finish() } // onDestroy에서 안내 정리·HUD 종료
                         .setNegativeButton("취소", null)
                         .show()
@@ -173,7 +199,7 @@ class KakaoNaviActivity : AppCompatActivity() {
             }
         })
         KakaoGuidance.view = v
-        KakaoGuidance.start(dest, simul) { err -> if (err != null) Toast.makeText(this, err, Toast.LENGTH_LONG).show() }
+        start()
     }
 
     companion object {
@@ -181,5 +207,6 @@ class KakaoNaviActivity : AppCompatActivity() {
         const val EXTRA_Y = "y"
         const val EXTRA_NAME = "name"
         const val EXTRA_SIMUL = "simul"
+        const val EXTRA_SAFE = "safe" // 안전운행 (목적지 없음)
     }
 }

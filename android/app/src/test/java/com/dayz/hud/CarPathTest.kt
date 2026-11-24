@@ -30,4 +30,24 @@ class CarPathTest {
         assertEquals(0f, CarPath.heading(l, 1)!!, 0.01f) // (10,0)→(10,10)은 북쪽
         assertEquals(0f, CarPath.heading(l + (10f to 10f), 2)!!, 0.01f) // 길이 0 마디면 뒤쪽 마디로
     }
+
+    @Test
+    fun zoomFollowsSpeed() {
+        assertEquals(1f, CarPath.speedZoom(0), 0.001f)
+        assertEquals(1f, CarPath.speedZoom(30), 0.001f)
+        assertEquals(1.6f, CarPath.speedZoom(70), 0.001f)
+        assertEquals(2.2f, CarPath.speedZoom(110), 0.001f)
+        assertEquals(2.2f, CarPath.speedZoom(150), 0.001f) // 위는 그대로
+        assertEquals(2f, CarPath.lerpZoom(1f, 4f, 0.5f), 0.001f) // 배율로 중간
+        assertEquals(4f, CarPath.lerpZoom(1f, 4f, 1f), 0.001f)
+    }
+
+    @Test
+    fun trafficBarMergesSameColor() {
+        val green = CarPath.trafficColor("KNTrafficState_Blue")
+        val red = CarPath.trafficColor("KNTrafficState_Red")
+        val runs = CarPath.trafficRuns(listOf("KNTrafficState_Blue", "KNTrafficState_Blue", "KNTrafficState_Red", "KNTrafficState_Blue"))
+        assertEquals(listOf(0.5f to green, 0.75f to red, 1f to green), runs)
+        assertEquals(CarPath.trafficColor("KNTrafficState_Unknown"), CarPath.trafficColor("뭔가")) // 모르는 값은 회색
+    }
 }

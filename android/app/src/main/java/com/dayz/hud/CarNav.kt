@@ -4,6 +4,8 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.text.SpannableString
+import android.text.Spanned
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -33,6 +35,7 @@ import androidx.car.app.SurfaceContainer
 import androidx.car.app.constraints.ConstraintManager
 import androidx.car.app.model.Action
 import androidx.car.app.model.ActionStrip
+import androidx.car.app.model.DurationSpan
 import androidx.car.app.model.CarIcon
 import androidx.car.app.model.DateTimeWithZone
 import androidx.car.app.model.Distance
@@ -47,8 +50,10 @@ import androidx.car.app.navigation.model.Destination
 import androidx.car.app.navigation.model.Lane
 import androidx.car.app.navigation.model.LaneDirection
 import androidx.car.app.navigation.model.Maneuver
+import androidx.car.app.navigation.model.MessageInfo
 import androidx.car.app.navigation.model.NavigationTemplate
 import androidx.car.app.navigation.model.PlaceListNavigationTemplate
+import androidx.car.app.navigation.model.RoutePreviewNavigationTemplate
 import androidx.car.app.navigation.model.RoutingInfo
 import androidx.car.app.navigation.model.Step
 import androidx.car.app.navigation.model.TravelEstimate
@@ -58,9 +63,11 @@ import androidx.core.graphics.drawable.IconCompat
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import com.kakaomobility.knsdk.KNSDK
+import com.kakaomobility.knsdk.common.util.DoublePoint
 import com.kakaomobility.knsdk.common.util.FloatPoint
 import com.kakaomobility.knsdk.guidance.knguidance.common.KNLocation
 import com.kakaomobility.knsdk.map.knmaprenderer.objects.KNMapCameraUpdate
+import com.kakaomobility.knsdk.map.knmaprenderer.objects.KNMapCoordinateRegion
 import com.kakaomobility.knsdk.map.knmaprenderer.renderer.idl.KNMapControlManager
 import com.kakaomobility.knsdk.map.knmapview.constants.KNLineDashType
 import com.kakaomobility.knsdk.map.uicustomsupport.renewal.KNMapPolyline
@@ -72,6 +79,7 @@ import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.exp
+import kotlin.math.ln
 import kotlin.math.sin
 
 // Android Auto 내비 앱 (PLAN.md A1). 폰에서 시작한 카카오 안내(KakaoGuidance)를 차량 화면에 보여 준다.
@@ -87,7 +95,7 @@ class HudCarAppService : CarAppService() {
             // 차량 연결이 끊기면 안내도 끝냄 — 도착 뒤 안내가 안 끝나고 남으면 SDK가 계속 돌 수 있음 (11/18 밤 데이터 5.8GB 의심)
             lifecycle.addObserver(object : DefaultLifecycleObserver {
                 override fun onDestroy(owner: LifecycleOwner) {
-                    if (KakaoGuidance.state == null) return
+                    if (!KakaoGuidance.active) return
                     HudService.log("차량 연결 끊김 → 안내 종료")
                     KakaoGuidance.stop()
                 }
@@ -126,6 +134,15 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
     private var simul = false // DHU 시험용
 
     override fun onGetTemplate(): Template {
+        if (KakaoGuidance.safeMode) {
+            val strip = ActionStrip.Builder()
+                .addAction(Action.Builder().setTitle("옵션").setOnClickListener { screenManager.push(OptionsScreen(carContext)) }.build())
+                .addAction(Action.Builder().setTitle("안전운행 종료").setOnClickListener { KakaoGuidance.stop() }.build())
+            return NavigationTemplate.Builder().setActionStrip(strip.build())
+                .setMapActionStrip(mapButtons()).setPanModeListener { }
+                .setNavigationInfo(MessageInfo.Builder("안전운행").setText("과속 카메라·구간단속·교통 정보").build())
+                .build()
+        }
         val s = KakaoGuidance.state ?: return destinations()
         // 지도 쪽 PAN 버튼이 있어야 지도가 터치를 받고, 그래야 숨은 오른쪽 위 버튼이 터치로 다시 나온다
         // PAN 버튼은 setPanModeListener가 있어야 보이고, 이동 모드에서만 onScroll이 온다 (나갈 땐 그 자리 유지, ◎로 복귀)
@@ -154,12 +171,17 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
         val fav = Favorites.load(prefs)
         for (p in Favorites.withRecents(fav, Recents.load(prefs)).take(limit - 2)) list.addItem(
             Row.Builder().setTitle(if (fav.any(p::same)) "★ ${p.name}" else p.name).addText(p.address.ifEmpty { " " }).setBrowsable(true)
-                .setOnClickListener { startFromCar(carContext, screenManager, p, simul) }.build(),
+                .setOnClickListener { chooseFromCar(carContext, screenManager, p, simul) }.build(),
         )
         // 시험용이라 맨 아래
         list.addItem(Row.Builder().setTitle(if (simul) "모의주행: 켜짐" else "모의주행: 꺼짐").addText("PC 시험용 (DHU)").setBrowsable(true)
             .setOnClickListener { simul = !simul; invalidate() }.build())
-        return PlaceListNavigationTemplate.Builder().setTitle("DayzHUD 카카오 길안내").setItemList(list.build()).setMapActionStrip(mapButtons()).setPanModeListener { }.build()
+        // 위쪽 버튼: 옵션, 그 옆에 안전운행 (목적지 없이 카메라·구간단속·교통 정보)
+        val strip = ActionStrip.Builder()
+            .addAction(Action.Builder().setTitle("옵션").setOnClickListener { screenManager.push(OptionsScreen(carContext)) }.build())
+            .addAction(Action.Builder().setTitle("안전운행").setOnClickListener { safeFromCar(carContext) }.build())
+        return PlaceListNavigationTemplate.Builder().setTitle("DayzHUD 카카오 길안내").setItemList(list.build())
+            .setActionStrip(strip.build()).setMapActionStrip(mapButtons()).setPanModeListener { }.build()
     }
 
     // 지도 버튼 (AA 규칙: 최대 4개, 아이콘만). PAN이 있어야 지도 끌기·핀치가 들어온다
@@ -167,7 +189,7 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
         .addAction(Action.PAN)
         .addAction(Action.Builder().setIcon(plusIcon).setOnClickListener { zoomBy(1 / 1.5f) }.build())
         .addAction(Action.Builder().setIcon(minusIcon).setOnClickListener { zoomBy(1 / 0.667f) }.build())
-        .addAction(Action.Builder().setIcon(hereIcon).setOnClickListener { free = null; zoom = baseZoom; settled = false }.build())
+        .addAction(Action.Builder().setIcon(hereIcon).setOnClickListener { free = null; zoom = baseZoom; camZoom = null; settled = false }.build())
         .build()
 
     private fun glyph(draw: Canvas.(Paint) -> Unit) = CarIcon.Builder(IconCompat.createWithBitmap(
@@ -191,14 +213,15 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
     // 지도 확대·축소: KNSDK 축척 (작을수록 확대). 범위·배율은 KNSDK 지도 화면의 zoomIn/zoomOut과 같게
     private fun zoomBy(k: Float) {
         val m = map ?: return
-        zoom = ((zoom ?: m.zoom) * k).coerceIn(0.5f, 2000f)
+        zoom = ((zoom ?: baseZoom ?: m.zoom) * k).coerceIn(0.5f, 2000f)
+        camZoom = camZoom?.times(k) // 버튼·핀치는 바로 (속도 변화만 천천히)
         settled = false
     }
 
     // 차량 계기판·순정 HUD로 가는 안내 (AA가 차에 전달)
     private fun updateTrip() {
         val s = KakaoGuidance.state
-        if (s == null) {
+        if (s == null || KakaoGuidance.safeMode) {
             if (navigating) nav.navigationEnded()
             navigating = false
             return
@@ -269,6 +292,8 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
     // ── 지도 자리: 카카오 지도 (KNSDK 렌더러를 AA Surface에 직접) ──
 
     private var map: KNMapControlManager? = null
+    private var trafficInit = false to false // 지도 기본 (traffic, visibleTraffic)
+    private var trafficShown: Boolean? = null
     private var shownRoutes: List<KNRoute>? = null
 
     override fun onSurfaceAvailable(c: SurfaceContainer) {
@@ -285,6 +310,9 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
             }.onFailure { HudService.log("차량 지도 실패: $it") }.getOrNull()?.apply {
                 HudService.log("차량 지도 시작 zoom=$zoom tilt=$tilt 경로 굵기=${routeProperties?.theme?.lineWidth}/${routeProperties?.theme?.strokeWidth}")
                 baseZoom = zoom
+                camZoom = null
+                trafficInit = getTraffic() to isVisibleTraffic
+                trafficShown = null
             }
             carRot = null
             cardKey = ""
@@ -319,16 +347,32 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
             canvas.rotate(r)
             canvas.drawBitmap(carBmp, -CAR_SIZE / 2f, -CAR_SIZE / 2f, carPaint)
             canvas.restore()
+            // 내 차 바로 아래: 현위치 주소 ↔ 목적지 번갈아
+            placeLabel()?.let { b -> canvas.drawBitmap(b, x - b.width / 2f, y + CAR_SIZE / 2f + 6f, carPaint) }
         }
+        val bar = trafficBar
+        if (bar != null) drawTrafficBar(canvas, bar)
+        val barSpace = if (bar != null) BAR_W + PANEL_MARGIN else 0f
         // 주유소 가격 표지 (내 차보다 아래에 깔리게 먼저). 끝이 주유소 자리를 가리킴
         for ((x, y, b) in stationPx) canvas.drawBitmap(b, x - b.width / 2f, y - b.height, carPaint)
         panelOverlay?.let { b ->
             // 보이는 영역(카드·버튼에 안 가리는 지도)의 오른쪽 위. 왼쪽 아래는 실차에서 시간 카드·내 차와 겹쳤음
             // 좁거나 낮은 화면이면 줄이기만 함: 폭은 오른쪽 절반, 높이는 내 차(3/4 지점)에 안 닿게 60%까지
             val v = visible ?: Rect(0, 0, surfaceSize.first, surfaceSize.second)
-            val s = minOf(1f, (v.width() / 2f - PANEL_MARGIN) / b.width, v.height() * 0.6f / b.height).coerceAtLeast(0.5f)
+            // 교통량 막대가 있으면 그 왼쪽으로
+            val s = minOf(1f, (v.width() / 2f - PANEL_MARGIN - barSpace) / b.width, v.height() * 0.6f / b.height).coerceAtLeast(0.5f)
             canvas.save()
-            canvas.translate(v.right - PANEL_MARGIN - b.width * s, v.top + PANEL_MARGIN)
+            canvas.translate(v.right - PANEL_MARGIN - barSpace - b.width * s, v.top + PANEL_MARGIN)
+            canvas.scale(s, s)
+            canvas.drawBitmap(b, 0f, 0f, carPaint)
+            canvas.restore()
+        }
+        hwOverlay?.let { b ->
+            // 보이는 영역의 왼쪽 위 (오른쪽은 정보판). 줄이는 규칙은 정보판과 같음
+            val v = visible ?: Rect(0, 0, surfaceSize.first, surfaceSize.second)
+            val s = minOf(1f, (v.width() / 2f - PANEL_MARGIN * 2) / b.width, v.height() * 0.6f / b.height).coerceAtLeast(0.5f)
+            canvas.save()
+            canvas.translate(v.left + PANEL_MARGIN, v.top + PANEL_MARGIN)
             canvas.scale(s, s)
             canvas.drawBitmap(b, 0f, 0f, carPaint)
             canvas.restore()
@@ -413,6 +457,8 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
     private var lastFrameAt = 0L
     private var zoom: Float? = null // 버튼·핀치로 바꾼 축척 (null = SDK 기본)
     private var baseZoom: Float? = null // 지도 처음 축척 (현재 위치 버튼으로 되돌림)
+    private var camZoom: Float? = null // 지금 그리는 축척 = 고른 축척 × 속도 배율, 천천히 따라감
+    private val ZOOM_TAU = 2_500f // ms. 속도가 바뀌어 지도가 넓어지고 좁아지는 시간 상수 (출렁임 없게 느리게)
     private var free: FloatPoint? = null // 지도를 끌어 놓은 자리 (null = 내 차 따라감)
     @Volatile private var carRot: Float? = null // 화면에서 내 차 아이콘 기울기 (진행 방향 - 지도 방향)
     @Volatile private var carPx: Pair<Float, Float>? = null // 지도를 끈 동안 내 차 화면 자리
@@ -423,6 +469,12 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
     private val frame = object : Runnable {
         override fun run() {
             drawFrame()
+            // 지도가 멈춰 있어도 덧그림이 바뀌면 다시 합성 (움직일 땐 지도 프레임마다 합성됨)
+            val key = "${labelText()}|${System.identityHashCode(trafficBar)}"
+            if (key != overlayKey) {
+                overlayKey = key
+                if (settled) compose.redraw()
+            }
             if (map != null) frames.postDelayed(this, FRAME_MS)
         }
     }
@@ -441,6 +493,28 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
         val pos = s?.pos ?: KNSDK.sharedGpsManager()?.lastValidGpsData?.pos?.let { FloatPoint(it.x.toFloat(), it.y.toFloat()) } ?: return
         val loc = s?.location
         val here = drawn ?: pos
+        updateTraffic(loc.takeIf { s?.routes != null }, s?.tbt?.totalDistance ?: 0)
+        updateAddress(pos)
+        // 경로 선택 중: 고른 경로 전체가 보이는 영역에 들어오게 (북쪽 위). 내 차 따라가기는 멈춤
+        // 안전운행이면 지도에 교통 정보 (끝나면 지도 기본으로)
+        val safe = KakaoGuidance.safeMode
+        if (safe != trafficShown) {
+            trafficShown = safe
+            m.setTraffic(safe || trafficInit.first)
+            m.isVisibleTraffic = safe || trafficInit.second
+            HudService.log("차량 지도 교통 정보 ${m.getTraffic()}/${m.isVisibleTraffic}")
+        }
+        val pv = KakaoGuidance.preview
+        if (pv != null && s == null) {
+            if (pv !== shownRoutes) {
+                m.setRoutes(pv)
+                shownRoutes = pv
+                val v = visible ?: Rect(0, 0, surfaceSize.first, surfaceSize.second)
+                m.moveCamera(KNMapCameraUpdate().fitTo(KNMapCoordinateRegion().initWithRoute(pv), RectF(v)).bearingTo(0f), false, false)
+            }
+            settled = true
+            return
+        }
         if (s?.routes !== shownRoutes) {
             s?.routes?.let(m::setRoutes) ?: m.removeRoutesAll()
             shownRoutes = s?.routes
@@ -457,7 +531,7 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
         val ahead = if (prev != null && loc != null && loc.polyIdx >= prev.polyIdx) {
             routePts.subList((prev.polyIdx + 1).coerceAtMost(routePts.size), (loc.polyIdx + 1).coerceIn(0, routePts.size))
         } else emptyList()
-        passed = if (s == null) emptyList() else passed + path.take(drawnUpto + 1) + here
+        passed = if (s?.routes == null) emptyList() else passed + path.take(drawnUpto + 1) + here
         path = listOf(here) + path.drop(drawnUpto + 1) + ahead + pos
         drawnUpto = 0
         passedLine?.let(m::removePolyline)
@@ -487,7 +561,7 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
         val (p, upto) = CarPath.along(xy, f).let { (q, i) -> FloatPoint(q.first, q.second) to i }
         drawn = p
         drawnUpto = upto
-        if (KakaoGuidance.state != null) {
+        if (KakaoGuidance.state?.routes != null) {
             tailLine?.let(m::removePolyline)
             tailLine = gray(m, path.take(upto + 1) + p)
         } else tailLine?.let(m::removePolyline).also { tailLine = null }
@@ -499,7 +573,13 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
         carAngle = CarPath.lerpAngle(carAngle, want, 1 - exp(-dt / ARROW_TAU))
         // 매 프레임 바로 옮김 (animateCamera(…, 0)은 애니메이션 객체를 매번 만들고 줌이 틀어짐)
         val cam = KNMapCameraUpdate().targetTo(free ?: p).bearingTo(camBearing).anchorTo(anchor())
-        zoom?.let(cam::zoomTo)
+        // 빠를수록 넓게 봄 → 한 프레임에 지도가 덜 움직여 고속에서 덜 끊겨 보임
+        val wantZoom = (zoom ?: baseZoom)?.let { it * CarPath.speedZoom(KakaoGuidance.state?.tbt?.speed ?: 0) }
+        if (wantZoom != null) {
+            val z = camZoom?.let { CarPath.lerpZoom(it, wantZoom, 1 - exp(-dt / ZOOM_TAU)) } ?: wantZoom
+            camZoom = z
+            cam.zoomTo(z)
+        }
         m.moveCamera(cam, false, false)
         carRot = CarPath.turn(camBearing, carAngle)
         carPx = if (free != null) m.katecToScreen(p).let { it.x to it.y } else null
@@ -508,37 +588,150 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
             val q = m.katecToScreen(FloatPoint(st.x.toFloat(), st.y.toFloat()))
             if (q.x < 0 || q.y < 0 || q.x > surfaceSize.first || q.y > surfaceSize.second) null else Triple(q.x, q.y, b)
         }
-        settled = f >= 1f && abs(CarPath.turn(camBearing, want)) < 0.3f && abs(CarPath.turn(carAngle, want)) < 0.3f
+        settled = f >= 1f && abs(CarPath.turn(camBearing, want)) < 0.3f && abs(CarPath.turn(carAngle, want)) < 0.3f &&
+            (wantZoom == null || abs(ln(camZoom!! / wantZoom)) < 0.01f)
+    }
+
+    // ── 오른쪽 교통량 막대 (남은 경로, 아래 = 내 자리 · 위 = 목적지) ──
+    // 경로 위 지점(KNLocation)마다 교통 상태가 있음 → 남은 거리를 같은 간격으로 짚어 색칠. 5초마다·경로 바뀌면 바로
+    @Volatile private var trafficBar: List<Pair<Float, Int>>? = null
+    private var trafficAt = 0L
+    private var trafficRoute: KNRoute? = null
+    private var overlayKey = ""
+    private val BAR_W = 14f
+    private val TRAFFIC_N = 60
+
+    private fun updateTraffic(loc: KNLocation?, remain: Int) {
+        if (loc == null || remain <= 0) {
+            trafficBar = null
+            trafficRoute = null
+            return
+        }
+        val now = SystemClock.uptimeMillis()
+        val newRoute = loc.route !== trafficRoute
+        if (!newRoute && now - trafficAt < 5_000) return
+        trafficAt = now
+        val states = (0 until TRAFFIC_N).map { i ->
+            runCatching { loc.locationAfterDist(((i + 0.5f) * remain / TRAFFIC_N).toInt())?.trafficSt?.name }.getOrNull() ?: "Unknown"
+        }
+        trafficBar = CarPath.trafficRuns(states)
+        if (newRoute) {
+            trafficRoute = loc.route
+            HudService.log("교통량 막대: 남은 ${remain}m ${states.groupingBy { it.removePrefix("KNTrafficState_") }.eachCount()}")
+        }
+    }
+
+    private fun drawTrafficBar(c: Canvas, runs: List<Pair<Float, Int>>) {
+        val v = visible ?: Rect(0, 0, surfaceSize.first, surfaceSize.second)
+        val right = v.right - PANEL_MARGIN
+        val left = right - BAR_W
+        val top = v.top + PANEL_MARGIN
+        val bottom = v.bottom - PANEL_MARGIN - BAR_W // 아래 내 자리 동그라미 자리
+        val len = bottom - top
+        if (len <= 0f) return
+        val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        // 지도 위에서 보이게 어두운 테두리
+        c.drawRoundRect(RectF(left - 3f, top - 3f, right + 3f, bottom + 3f), BAR_W, BAR_W, p.apply { color = 0xCC000000.toInt() })
+        var from = 0f
+        for ((end, color) in runs) {
+            c.drawRect(left, bottom - end * len, right, bottom - from * len, p.apply { this.color = color })
+            from = end
+        }
+        // 위 끝 = 목적지 (흰 막대), 아래 끝 = 내 자리 (내 차 아이콘과 같은 흰 원·앰버 테두리)
+        c.drawRect(left - 3f, top - 3f, right + 3f, top + 3f, p.apply { color = Color.WHITE })
+        val cx = (left + right) / 2
+        c.drawCircle(cx, bottom, BAR_W * 0.9f, p.apply { color = Color.WHITE })
+        c.drawCircle(cx, bottom, BAR_W * 0.9f, p.apply { color = MainActivity.ACCENT; style = Paint.Style.STROKE; strokeWidth = 4f })
+    }
+
+    // ── 내 차 아래 글: 현위치 주소 ↔ 목적지 (안내 중일 때만 번갈아, 4초씩) ──
+    // 주소는 SDK 역지오코딩 (지역 단위로 받아 캐시). 30m 넘게 움직였을 때 10초마다, 150m 넘게 움직이면 바로
+    @Volatile private var address: String? = null
+    private var addrAt = 0L
+    private var addrPos: FloatPoint? = null
+    private var addrLogged = false
+    private var labelCache: Pair<String, Bitmap>? = null
+    private val LABEL_MS = 4_000L
+
+    private fun updateAddress(pos: FloatPoint) {
+        val now = SystemClock.uptimeMillis()
+        val moved = addrPos?.let { Math.hypot((pos.x - it.x).toDouble(), (pos.y - it.y).toDouble()) } ?: Double.MAX_VALUE
+        if (moved < 30 || (now - addrAt < 10_000 && moved < 150)) return
+        addrAt = now
+        addrPos = pos
+        runCatching {
+            KNSDK.reverseGeocodeWithPos(DoublePoint(pos.x.toDouble(), pos.y.toDouble()), true) { err, a, b, c, d ->
+                if (!addrLogged) {
+                    addrLogged = true
+                    HudService.log(if (err != null) "현위치 주소 실패: ${err.code} ${err.msg}" else "현위치 주소: $a | $b | $c | $d")
+                }
+                if (err == null) address = listOf(a, b, c, d).filterNot { it.isNullOrBlank() }.distinct().joinToString(" ").ifBlank { null }
+            }
+        }.onFailure { if (!addrLogged) HudService.log("현위치 주소 실패: $it").also { addrLogged = true } }
+    }
+
+    // 지금 보일 글과 앞 점 색 (목적지 빨강, 현위치 앰버). 안내 없으면 주소만
+    private fun labelText(): Pair<String, Int>? {
+        val s = KakaoGuidance.state
+        val dest = s?.destination?.takeIf { s.routes != null && it.isNotBlank() }
+        val addr = address
+        val showDest = dest != null && (addr == null || SystemClock.uptimeMillis() / LABEL_MS % 2 == 1L)
+        return if (showDest) "목적지 $dest" to 0xFFE53935.toInt() else addr?.let { it to MainActivity.ACCENT }
+    }
+
+    private fun placeLabel(): Bitmap? {
+        val (text, dot) = labelText() ?: return null
+        labelCache?.takeIf { it.first == text }?.let { return it.second }
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 22f; isFakeBoldText = true; color = Color.WHITE }
+        val t = fit(text, p, 360f)
+        val w = (p.measureText(t) + 52f).toInt()
+        val h = 40
+        return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also {
+            val c = Canvas(it)
+            c.drawRoundRect(RectF(0f, 0f, w.toFloat(), h.toFloat()), h / 2f, h / 2f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xE6202329.toInt() })
+            c.drawCircle(22f, h / 2f, 7f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = dot })
+            c.drawText(t, 38f, h / 2f - (p.ascent() + p.descent()) / 2, p)
+            labelCache = text to it
+        }
     }
 
     // ── 정보판: 현재 속도, 카메라·주의 지점(제한속도·거리), 돌발 ──
     // AA 템플릿엔 속도·카메라 칸이 없어서 직접 그린다 (바탕 없이 글자·표지만, 글자엔 그림자). 위치는 왼쪽 칸 회전 카드 바로 아래.
     // 지도 마커로 그리면 지도 SDK가 카메라·마커를 다른 프레임에 반영해 떨림 → 지도 그림 위에 화면 좌표로 합성 (CarCompositor)
     @Volatile private var panelOverlay: Bitmap? = null
+    @Volatile private var hwOverlay: Bitmap? = null
     private var cardKey = ""
 
     private fun updateCard(@Suppress("UNUSED_PARAMETER") m: KNMapControlManager, s: KakaoGuidance.State?) {
         if (s == null) {
             panelOverlay = null
+            hwOverlay = null
             cardKey = ""
             return
         }
         val t = s.tbt.takeIf { it.safe }
         val ev = s.event
-        val key = listOf(s.tbt.speed, t?.safeCode, t?.safeSpeedLimit, t?.safeDistance?.div(10), t?.blockSpeed, ev?.title, ev?.distance?.div(10)).joinToString("|")
+        val hw = s.highway.joinToString { "${it.kind}${it.name}${it.distance / 100}${it.note}" }
+        val key = listOf(s.tbt.speed, t?.safeCode, t?.safeSpeedLimit, t?.safeDistance?.div(10), t?.block, t?.blockSpeed, t?.blockDistance?.div(100), ev?.title, ev?.distance?.div(10), hw).joinToString("|")
         if (key == cardKey) return
         panelOverlay = panelBitmap(s.tbt.speed, t, ev)
+        hwOverlay = s.highway.takeIf { it.isNotEmpty() }?.let(::highwayBitmap)
         cardKey = key
     }
 
-    // 오른쪽 위에 붙는 정보판, 바탕 없음: 오른쪽 열에 속도 → 그 아래 제한속도 표지, 맨 아래 글줄(오른쪽 맞춤)
+    // 오른쪽 위에 붙는 정보판, 바탕 없음: 오른쪽 열에 속도 → 그 아래 제한속도 표지 → 글줄(오른쪽 맞춤)
     private fun panelBitmap(speed: Int, t: Tbt?, ev: KakaoGuidance.RoadEvent?): Bitmap {
+        val limit = t?.safeSpeedLimit ?: 0
         val lines = buildList {
-            if (t != null) add("${KakaoNaviMapping.sdiLabel(t.safeCode)} ${meters(t.safeDistance)}" to 0xFFFFC107.toInt())
-            if (t != null && t.block && t.blockSpeed > 0) add("구간 평균 ${t.blockSpeed}km/h" to Color.WHITE)
+            // 구간단속 중이면 "구간 단속중"이 대신하므로 "구간단속 중 n km" 줄은 뺌
+            if (t != null && !(t.block && t.safeCode == 4)) add("${KakaoNaviMapping.sdiLabel(t.safeCode)} ${meters(t.safeDistance)}" to 0xFFFFC107.toInt())
+            if (t != null && t.block) {
+                add("구간 단속중 · 남은 ${meters(t.blockDistance)}" to 0xFFFFC107.toInt())
+                // 평균이 제한속도를 넘으면 빨강
+                if (t.blockSpeed > 0) add("평균 ${t.blockSpeed}km/h" to if (limit > 0 && t.blockSpeed > limit) 0xFFFF5252.toInt() else 0xFF69F0AE.toInt())
+            }
             if (ev != null) add("${ev.title} ${meters(ev.distance)}" to 0xFFFF8A65.toInt())
         }
-        val limit = t?.safeSpeedLimit ?: 0
         val w = PANEL_W
         val cx = w - 62f // 속도·표지 열 가운데
         val top = if (limit > 0) 206 else 108 // 속도(108) + 표지(98)
@@ -579,6 +772,51 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
                 }
                 y += 36f
             }
+        }
+    }
+
+    // 왼쪽 위 고속도로 시설 카드: 먼 곳이 위, 가장 가까운 곳이 맨 아래 (지나가면 아래 카드부터 바뀜)
+    private fun highwayBitmap(hw: List<KakaoGuidance.Highway>): Bitmap {
+        val w = PANEL_W
+        val h = hw.sumOf { hwCardH(it) + HW_GAP } - HW_GAP
+        return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also {
+            val c = Canvas(it)
+            var top = 0f
+            for (item in hw.asReversed()) {
+                hwCard(c, top, w.toFloat(), item)
+                top += hwCardH(item) + HW_GAP
+            }
+        }
+    }
+
+    private val HW_GAP = 6
+    private fun hwCardH(item: KakaoGuidance.Highway) = if (item.note != null) 96 else 74
+
+    // [동그라미 표지 | 이름 / 거리 / 메모] 어두운 카드 (상표 그림 없이 글자 표지)
+    private fun hwCard(c: Canvas, top: Float, w: Float, item: KakaoGuidance.Highway) {
+        val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        c.drawRoundRect(RectF(0f, top, w, top + hwCardH(item)), 12f, 12f, p.apply { color = 0xE6202329.toInt() })
+        val (label, color) = when (item.kind) {
+            "IC" -> "IC" to 0xFF1E88E5.toInt()
+            "JC" -> "JC" to 0xFF1E88E5.toInt()
+            "TG" -> "요금" to 0xFF43A047.toInt()
+            "SA" -> "휴" to 0xFFFB8C00.toInt()
+            else -> "P" to 0xFF1E88E5.toInt() // 졸음쉼터
+        }
+        c.drawCircle(34f, top + 37f, 22f, p.apply { this.color = color })
+        val mid = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textAlign = Paint.Align.CENTER; isFakeBoldText = true; this.color = Color.WHITE
+            textSize = if (label.length > 1) 17f else 24f
+        }
+        c.drawText(label, 34f, top + 37f - (mid.ascent() + mid.descent()) / 2, mid)
+        val x = 66f
+        val name = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 22f; this.color = 0xFFC8CCD2.toInt() }
+        c.drawText(fit(item.name, name, w - x - 10f), x, top + 28f, name)
+        val dist = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 30f; isFakeBoldText = true; this.color = Color.WHITE }
+        c.drawText(meters(item.distance), x, top + 62f, dist)
+        item.note?.let {
+            val note = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 20f; this.color = 0xFFFFD54F.toInt() }
+            c.drawText(fit(it, note, w - x - 10f), x, top + 88f, note)
         }
     }
 
@@ -740,6 +978,7 @@ class CarCompositor(private val overlay: (Canvas) -> Unit) {
     fun start(out: Surface, w: Int, h: Int): ImageReader {
         stop()
         val t = HandlerThread("car-compose").also { it.start(); thread = it }
+        handler = Handler(t.looper)
         // KNSDK GL 출력이 RGBX (RGBA로 받으면 형식이 달라 프레임이 전부 버려짐)
         return ImageReader.newInstance(w, h, PixelFormat.RGBX_8888, 3, HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE or HardwareBuffer.USAGE_GPU_COLOR_OUTPUT)
             .also { r ->
@@ -752,18 +991,31 @@ class CarCompositor(private val overlay: (Canvas) -> Unit) {
         val img = runCatching { r.acquireLatestImage() }.getOrNull() ?: return
         val hb = img.hardwareBuffer
         val bmp = hb?.let { Bitmap.wrapHardwareBuffer(it, ColorSpace.get(ColorSpace.Named.SRGB)) }
-        if (bmp != null) runCatching {
-            val c = out.lockHardwareCanvas()
-            c.drawBitmap(bmp, 0f, 0f, null)
-            overlay(c)
-            out.unlockCanvasAndPost(c)
-        }.onFailure { HudService.log("차량 화면 합성 실패: $it") }
+        if (bmp != null) paint(bmp, out)
+        last = bmp?.let { it to out }
         hb?.close()
         held?.close()
         held = img
     }
 
+    private fun paint(bmp: Bitmap, out: Surface) = runCatching {
+        val c = out.lockHardwareCanvas()
+        c.drawBitmap(bmp, 0f, 0f, null)
+        overlay(c)
+        out.unlockCanvasAndPost(c)
+    }.onFailure { HudService.log("차량 화면 합성 실패: $it") }
+
+    private var last: Pair<Bitmap, Surface>? = null // 직전 지도 프레임 (held가 쥐고 있는 동안 유효)
+    private var handler: Handler? = null
+
+    // 지도가 멈춰 새 프레임이 안 올 때도 덧그림(내 차 아래 글, 교통량 막대)을 바꿔 그림
+    fun redraw() {
+        handler?.post { last?.let { (b, out) -> paint(b, out) } }
+    }
+
     fun stop() {
+        handler = null
+        last = null
         reader?.setOnImageAvailableListener(null, null)
         thread?.quitSafely()
         thread = null
@@ -791,6 +1043,33 @@ object CarPath {
             left -= len
         }
         return pts.last() to pts.lastIndex - 1
+    }
+
+    // 속도(km/h) → 축척 배율: 30까지 1배, 110에서 2.2배 (그 위는 그대로). 시내는 자세히, 고속도로는 멀리
+    fun speedZoom(kmh: Int): Float = 1f + (kmh - 30).coerceIn(0, 80) / 80f * 1.2f
+
+    // 축척 보간은 배율로 (1→2와 2→4가 같은 빠르기로 보이게)
+    fun lerpZoom(a: Float, b: Float, f: Float): Float = a * Math.pow((b / a).toDouble(), f.toDouble()).toFloat()
+
+    // KNTrafficState 이름 → 교통량 막대 색. 원활은 초록(SDK 이름은 Blue), 정보 없으면 회색
+    fun trafficColor(state: String): Int = when (state.removePrefix("KNTrafficState_")) {
+        "Blue" -> 0xFF43A047.toInt()
+        "Yellow" -> 0xFFFDD835.toInt()
+        "Orange" -> 0xFFFB8C00.toInt()
+        "Red" -> 0xFFE53935.toInt()
+        "Blocked" -> 0xFF7B1010.toInt()
+        else -> 0xFF7A8290.toInt()
+    }
+
+    // 남은 경로를 같은 간격으로 짚은 교통 상태(가까운 곳부터) → (끝 비율 0~1, 색) 칸. 같은 색이 이어지면 한 칸
+    fun trafficRuns(states: List<String>): List<Pair<Float, Int>> {
+        val out = mutableListOf<Pair<Float, Int>>()
+        states.forEachIndexed { i, s ->
+            val c = trafficColor(s)
+            val end = (i + 1f) / states.size
+            if (out.lastOrNull()?.second == c) out[out.lastIndex] = end to c else out += end to c
+        }
+        return out
     }
 
     // 각도(도) 보간: 짧은 쪽으로 (350 → 10은 0을 지나감)
@@ -875,21 +1154,79 @@ object CarManeuver {
     }
 }
 
-// ── 차량 화면에서 목적지 고르기 (A2): NavScreen 목록(검색·최근 목적지) → 누르면 안내 시작 ──
+// ── 차량 화면에서 목적지 고르기 (A2): NavScreen 목록(검색·최근 목적지) → 경로 선택 → 출발 ──
 
-// 차에서 고른 목적지로 안내 시작. 폰 앱을 안 열었으면 HUD 연결 서비스도 같이 띄운다
-private fun startFromCar(ctx: CarContext, sm: androidx.car.app.ScreenManager, p: Place, simul: Boolean) {
+// 차에서 고른 목적지 → 경로 선택 화면 (설정에서 끄면 바로 안내). 폰 앱을 안 열었으면 HUD 연결 서비스도 같이 띄운다
+private fun chooseFromCar(ctx: CarContext, sm: androidx.car.app.ScreenManager, p: Place, simul: Boolean) {
     Recents.remember(ctx.getSharedPreferences("hud", Context.MODE_PRIVATE), p)
     if (HudService.instance == null) {
         // ponytail: 백그라운드 FGS 시작이 막히면(Android 12+) 폰에서 앱을 한 번 열어야 HUD 연결됨. 안내 자체는 진행
         runCatching { ctx.startForegroundService(Intent(ctx, HudService::class.java)) }
             .onFailure { HudService.log("차에서 HUD 연결 시작 실패: $it") }
     }
+    if (KakaoGuidance.routePick) return sm.push(RouteScreen(ctx, p, simul))
     KakaoGuidance.init(ctx.applicationContext as Application) { err ->
         if (err != null) return@init CarToast.makeText(ctx, "카카오 초기화 실패 ${err.code}", CarToast.LENGTH_LONG).show()
         KakaoGuidance.start(p, simul) { e -> if (e != null) CarToast.makeText(ctx, e, CarToast.LENGTH_LONG).show() }
     }
-    sm.popToRoot()
+}
+
+// 차에서 안전운행 시작 (HUD 연결 서비스도 같이)
+private fun safeFromCar(ctx: CarContext) {
+    if (HudService.instance == null) runCatching { ctx.startForegroundService(Intent(ctx, HudService::class.java)) }
+        .onFailure { HudService.log("차에서 HUD 연결 시작 실패: $it") }
+    KakaoGuidance.init(ctx.applicationContext as Application) { err ->
+        if (err != null) return@init CarToast.makeText(ctx, "카카오 초기화 실패 ${err.code}", CarToast.LENGTH_LONG).show()
+        KakaoGuidance.safeDrive()
+    }
+}
+
+// 경로 선택: 종류별 시간·거리·통행료 목록, 고르면 지도에 그 경로 전체, '출발'로 안내 시작
+class RouteScreen(ctx: CarContext, private val to: Place, private val simul: Boolean) : Screen(ctx) {
+    private var choices: List<KakaoGuidance.RouteChoice>? = null
+    private var selected = 0
+
+    init {
+        KakaoGuidance.init(ctx.applicationContext as Application) { err ->
+            if (err != null) return@init fail("카카오 초기화 실패 ${err.code}")
+            KakaoGuidance.plan(to) { list, e ->
+                if (e != null) return@plan fail(e)
+                choices = list
+                KakaoGuidance.preview = listOf(list[0].route)
+                invalidate()
+            }
+        }
+        lifecycle.addObserver(object : DefaultLifecycleObserver {
+            // 뒤로 나가면 미리보기 경로 지움 (출발하면 go()에서 이미 지움)
+            override fun onDestroy(owner: LifecycleOwner) { KakaoGuidance.preview = null }
+        })
+    }
+
+    private fun fail(msg: String) {
+        CarToast.makeText(carContext, msg, CarToast.LENGTH_LONG).show()
+        screenManager.pop()
+    }
+
+    override fun onGetTemplate(): Template {
+        val b = RoutePreviewNavigationTemplate.Builder().setTitle(to.name).setHeaderAction(Action.BACK)
+        val list = choices ?: return b.setLoading(true).build()
+        val items = ItemList.Builder().setOnSelectedListener { i ->
+            selected = i
+            KakaoGuidance.preview = listOf(list[i].route)
+        }
+        // 이 템플릿은 줄마다 시간·거리 span이 있어야 한다 (없으면 IllegalArgumentException으로 앱 종료, 0.1.5 실기기)
+        for (c in list) {
+            val text = SpannableString(KakaoNaviMapping.routeSummary(c.route.totalTime, c.route.totalDist, c.route.totalCost))
+            text.setSpan(DurationSpan.create(c.route.totalTime.toLong()), 0, text.indexOf(" · "), Spanned.SPAN_INCLUSIVE_EXCLUSIVE)
+            items.addItem(Row.Builder().setTitle(c.label).addText(text).build())
+        }
+        return b.setItemList(items.setSelectedIndex(selected).build())
+            .setNavigateAction(Action.Builder().setTitle("출발").setOnClickListener {
+                KakaoGuidance.go(list[selected], simul)
+                screenManager.popToRoot()
+            }.build())
+            .build()
+    }
 }
 
 private fun placeList(ctx: CarContext, places: List<Place>, empty: String, onPick: (Place) -> Unit): ItemList {
@@ -919,7 +1256,7 @@ class SearchScreen(ctx: CarContext, private val simul: () -> Boolean) : Screen(c
             }
         }).setHeaderAction(Action.BACK).setSearchHint("장소·주소").setShowKeyboardByDefault(results == null)
         if (loading) b.setLoading(true)
-        else results?.let { r -> b.setItemList(placeList(carContext, r, "검색 결과 없음") { startFromCar(carContext, screenManager, it, simul()) }) }
+        else results?.let { r -> b.setItemList(placeList(carContext, r, "검색 결과 없음") { chooseFromCar(carContext, screenManager, it, simul()) }) }
         return b.build()
     }
 }
@@ -939,6 +1276,10 @@ class OptionsScreen(ctx: CarContext) : Screen(ctx) {
         list.addItem(
             Row.Builder().setTitle("음성 나올 때 음악 줄이기: ${if (KakaoGuidance.duck) "켜짐" else "꺼짐"}")
                 .setOnClickListener { KakaoGuidance.duck = !KakaoGuidance.duck; invalidate() }.build(),
+        )
+        list.addItem(
+            Row.Builder().setTitle("최소 안내: ${if (KakaoGuidance.minimal) "켜짐" else "꺼짐"}").addText("회전 안내 음성을 줄임 (카메라 안내는 그대로)")
+                .setOnClickListener { KakaoGuidance.minimal = !KakaoGuidance.minimal; invalidate() }.build(),
         )
         // 지도에 주유소 가격: 끔 → 휘발유 → 경유
         val prefs = carContext.getSharedPreferences("hud", Context.MODE_PRIVATE)

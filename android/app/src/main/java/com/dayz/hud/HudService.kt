@@ -21,6 +21,9 @@ import android.os.SystemClock
 import android.service.notification.NotificationListenerService
 import android.util.Log
 import java.io.File
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import java.util.concurrent.Executors
 import kotlin.math.roundToInt
 
 // HUD 연결과 TMAP 수신을 화면과 분리해 유지한다 (화면 회전·앱 전환·화면 꺼짐에도 끊기지 않게).
@@ -33,6 +36,7 @@ class HudService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        openLog(dumpDir(this))
         val prefs = getSharedPreferences("hud", MODE_PRIVATE)
         kivic = KivicLink(this, ::log) { kivic.sendFrames(KivicPacket.settings(HudSettings.load(prefs))) }
         tmap = TmapSource(this, ::log) { kivic.sendTbt(it) }
@@ -109,6 +113,9 @@ class HudService : Service() {
             if (!l.hasSpeed()) return
             speedKmh = (l.speed * 3.6f).roundToInt()
             speedAt = SystemClock.elapsedRealtime()
+            // 길안내가 없으면(아무것도 안 보냈거나 마지막이 안내 종료) TMAP 무안내처럼 종료 + 속도만. 바뀔 때만
+            val last = kivic.lastTbt
+            if (kivic.ready && last?.connected != true && last?.speed != speedKmh) kivic.sendTbt(TmapMapping.ENDED.copy(speed = speedKmh))
         }
         override fun onProviderEnabled(provider: String) {}
         override fun onProviderDisabled(provider: String) {}
@@ -139,7 +146,26 @@ class HudService : Service() {
         val logLines = ArrayDeque<String>()
         var onLog: (() -> Unit)? = null
 
+        // 주행 로그 파일: dump/drive-날짜.log (logcat은 금방 지워져 지난 주행을 못 봄). 기록 내보내기 zip에 같이 들어감
+        @Volatile var logDir: File? = null
+        private val logIo = Executors.newSingleThreadExecutor()
+        private val DAY = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+        private val TIME = DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
+        private const val KEEP_DAYS = 14
+
+        // 앱 시작 때 한 번: 폴더 정하고 오래된 주행 로그 지움
+        fun openLog(dir: File) {
+            if (logDir != null) return
+            logDir = dir
+            logIo.execute {
+                val old = System.currentTimeMillis() - KEEP_DAYS * 86_400_000L
+                dir.listFiles { f -> f.name.startsWith("drive-") && f.lastModified() < old }?.forEach { it.delete() }
+            }
+        }
+
         fun log(msg: String) {
+            val at = LocalDateTime.now()
+            logDir?.let { d -> logIo.execute { runCatching { File(d, "drive-${DAY.format(at)}.log").appendText("${TIME.format(at)} $msg\n") } } }
             main.post {
                 Log.i("DayzHUD", msg) // PC에서 adb logcat -s DayzHUD 로 확인
                 logLines.addFirst(msg)
