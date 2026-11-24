@@ -463,6 +463,7 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
     private var free: FloatPoint? = null // 지도를 끌어 놓은 자리 (null = 내 차 따라감)
     @Volatile private var carRot: Float? = null // 화면에서 내 차 아이콘 기울기 (진행 방향 - 지도 방향)
     @Volatile private var carPx: Pair<Float, Float>? = null // 지도를 끈 동안 내 차 화면 자리
+    private var previewAt: FloatPoint? = null // 경로 선택 중 내 차 자리 (그 동안은 frame에서 화면 자리를 잼)
     private var startedAt = 0L
     private var settled = false
     private var ticks = 0
@@ -470,8 +471,10 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
     private val frame = object : Runnable {
         override fun run() {
             drawFrame()
+            // 경로 선택 중: fitTo 카메라는 moveCamera 직후가 아니라 나중에 반영됨 → 반영될 때까지 매 프레임 내 차 화면 자리를 다시 잼
+            previewAt?.let { p -> map?.katecToScreen(p)?.let { q -> carPx = q.x to q.y } }
             // 지도가 멈춰 있어도 덧그림이 바뀌면 다시 합성 (움직일 땐 지도 프레임마다 합성됨)
-            val key = "${labelText()}|${System.identityHashCode(trafficBar)}"
+            val key = "${labelText()}|${System.identityHashCode(trafficBar)}|$carPx"
             if (key != overlayKey) {
                 overlayKey = key
                 if (settled) compose.redraw()
@@ -514,11 +517,12 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
                 m.moveCamera(KNMapCameraUpdate().fitTo(KNMapCoordinateRegion().initWithRoute(pv), RectF(v)).bearingTo(0f), false, false)
             }
             // 지도가 경로 전체에 맞춰져 있으니 내 차는 고정 자리(anchor) 말고 지도 위 실제 자리에 (북쪽 위라 화살표는 진행 방향 그대로)
-            carPx = m.katecToScreen(here).let { it.x to it.y }
+            previewAt = here
             carRot = carAngle
             settled = true
             return
         }
+        previewAt = null
         if (s?.routes !== shownRoutes) {
             s?.routes?.let(m::setRoutes) ?: m.removeRoutesAll()
             shownRoutes = s?.routes
