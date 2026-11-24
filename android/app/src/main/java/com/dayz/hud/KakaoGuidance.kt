@@ -341,6 +341,7 @@ object KakaoGuidance :
     private fun audio() = app?.getSystemService(AudioManager::class.java)
 
     private fun end() {
+        log(if (safeMode) "카카오 안전운행 끝" else "카카오 안내 끝")
         guidance = null
         safeMode = false
         audio()?.abandonAudioFocusRequest(focus) // 음성 도중 끝나도 음악 볼륨 되돌림

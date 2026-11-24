@@ -82,6 +82,15 @@ class KakaoNaviMappingTest {
     }
 
     @Test
+    fun addressDropsCodeAndShortensCity() {
+        // 실기기 로그: 1150061100 | 서울특별시 | 강서구 | 발산제1동
+        assertEquals("서울시 강서구 발산제1동", KakaoNaviMapping.address(listOf("1150061100", "서울특별시", "강서구", "발산제1동")))
+        assertEquals("부산시 해운대구 우동", KakaoNaviMapping.address(listOf("2635010500", "부산광역시", "해운대구", "우동")))
+        assertEquals("경기도 군포시 금정동", KakaoNaviMapping.address(listOf(null, "경기도", "군포시", "금정동")))
+        assertEquals(null, KakaoNaviMapping.address(listOf("123", "", null, " ")))
+    }
+
+    @Test
     fun safeDriveKeepsOnlySpeedAndCamera() {
         val t = KakaoNaviMapping.safeTbt(KakaoNaviMapping.Guide(
             rg = 0, turnDistance = 0, name = "", remainDistance = 0, remainSeconds = 0, speed = 72,

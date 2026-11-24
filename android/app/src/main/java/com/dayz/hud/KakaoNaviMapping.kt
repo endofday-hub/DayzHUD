@@ -71,6 +71,13 @@ object KakaoNaviMapping {
         return "$time · $dist · ${if (cost > 0) "통행료 %,d원".format(cost) else "무료"}"
     }
 
+    // SDK 역지오코딩 결과 (법정동 코드, 시도, 시군구, 동 — 0.1.6 실기기) → "서울시 강서구 발산제1동".
+    // 숫자뿐인 코드는 빼고 특별시·광역시·특별자치시는 "시"로 줄임 (차 아이콘 아래 한 줄에 들어가게)
+    fun address(parts: List<String?>): String? = parts
+        .filterNot { it.isNullOrBlank() || it.all(Char::isDigit) }
+        .map { it!!.replace(Regex("(특별자치|특별|광역)시$"), "시") }
+        .distinct().joinToString(" ").ifBlank { null }
+
     // 이 거리 안의 안전 정보만 HUD에 (TMAP showSDI와 비슷하게)
     private const val SDI_RANGE = 1_000
 

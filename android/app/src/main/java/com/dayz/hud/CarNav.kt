@@ -61,6 +61,7 @@ import androidx.car.app.navigation.model.Trip
 import androidx.car.app.validation.HostValidator
 import androidx.core.graphics.drawable.IconCompat
 import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import com.kakaomobility.knsdk.KNSDK
 import com.kakaomobility.knsdk.common.util.DoublePoint
@@ -339,6 +340,8 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
 
     // 지도 그림 위에 내 차(카메라가 늘 anchor 자리에 맞춤 → 그 화면 좌표)와 정보판(보이는 영역 오른쪽 위)을 얹어 차량 화면으로
     private val compose = CarCompositor { canvas ->
+        // 주유소 가격 표지 (내 차·아래 글보다 아래에 깔리게 먼저). 끝이 주유소 자리를 가리킴
+        for ((x, y, b) in stationPx) canvas.drawBitmap(b, x - b.width / 2f, y - b.height, carPaint)
         carRot?.let { r ->
             val a = anchor()
             val (x, y) = carPx ?: (a.x * surfaceSize.first to a.y * surfaceSize.second)
@@ -353,8 +356,6 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
         val bar = trafficBar
         if (bar != null) drawTrafficBar(canvas, bar)
         val barSpace = if (bar != null) BAR_W + PANEL_MARGIN else 0f
-        // 주유소 가격 표지 (내 차보다 아래에 깔리게 먼저). 끝이 주유소 자리를 가리킴
-        for ((x, y, b) in stationPx) canvas.drawBitmap(b, x - b.width / 2f, y - b.height, carPaint)
         panelOverlay?.let { b ->
             // 보이는 영역(카드·버튼에 안 가리는 지도)의 오른쪽 위. 왼쪽 아래는 실차에서 시간 카드·내 차와 겹쳤음
             // 좁거나 낮은 화면이면 줄이기만 함: 폭은 오른쪽 절반, 높이는 내 차(3/4 지점)에 안 닿게 60%까지
@@ -512,6 +513,9 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
                 val v = visible ?: Rect(0, 0, surfaceSize.first, surfaceSize.second)
                 m.moveCamera(KNMapCameraUpdate().fitTo(KNMapCoordinateRegion().initWithRoute(pv), RectF(v)).bearingTo(0f), false, false)
             }
+            // 지도가 경로 전체에 맞춰져 있으니 내 차는 고정 자리(anchor) 말고 지도 위 실제 자리에 (북쪽 위라 화살표는 진행 방향 그대로)
+            carPx = m.katecToScreen(here).let { it.x to it.y }
+            carRot = carAngle
             settled = true
             return
         }
@@ -665,7 +669,7 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
                     addrLogged = true
                     HudService.log(if (err != null) "현위치 주소 실패: ${err.code} ${err.msg}" else "현위치 주소: $a | $b | $c | $d")
                 }
-                if (err == null) address = listOf(a, b, c, d).filterNot { it.isNullOrBlank() }.distinct().joinToString(" ").ifBlank { null }
+                if (err == null) address = KakaoNaviMapping.address(listOf(a, b, c, d))
             }
         }.onFailure { if (!addrLogged) HudService.log("현위치 주소 실패: $it").also { addrLogged = true } }
     }
@@ -1190,6 +1194,7 @@ class RouteScreen(ctx: CarContext, private val to: Place, private val simul: Boo
         KakaoGuidance.init(ctx.applicationContext as Application) { err ->
             if (err != null) return@init fail("카카오 초기화 실패 ${err.code}")
             KakaoGuidance.plan(to) { list, e ->
+                if (!alive) return@plan // 찾는 동안 뒤로 나감
                 if (e != null) return@plan fail(e)
                 choices = list
                 KakaoGuidance.preview = listOf(list[0].route)
@@ -1202,6 +1207,9 @@ class RouteScreen(ctx: CarContext, private val to: Place, private val simul: Boo
         })
     }
 
+    // 닫힌 뒤 늦게 오는 콜백(경로 탐색 결과, AA 선택 알림)이 미리보기를 다시 켜면 안내가 끝난 뒤 지도가 미리보기로 굳음 (0.1.6 DHU)
+    private val alive get() = lifecycle.currentState != Lifecycle.State.DESTROYED
+
     private fun fail(msg: String) {
         CarToast.makeText(carContext, msg, CarToast.LENGTH_LONG).show()
         screenManager.pop()
@@ -1211,6 +1219,7 @@ class RouteScreen(ctx: CarContext, private val to: Place, private val simul: Boo
         val b = RoutePreviewNavigationTemplate.Builder().setTitle(to.name).setHeaderAction(Action.BACK)
         val list = choices ?: return b.setLoading(true).build()
         val items = ItemList.Builder().setOnSelectedListener { i ->
+            if (!alive) return@setOnSelectedListener
             selected = i
             KakaoGuidance.preview = listOf(list[i].route)
         }
