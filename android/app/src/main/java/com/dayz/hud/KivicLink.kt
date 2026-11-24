@@ -65,6 +65,18 @@ class KivicLink(
             log("TBT code=${t.turnCode} ${t.turnDistance}m display=${t.naviDisplayStatus} status=${t.naviStatus}" +
                 if (t.lane) " lane=${t.laneTurnInfo} etc=${t.laneEtc} ok=${t.laneAvailable} ${t.laneDistance}m" else "")
             send(KivicPacket.tbt(t))
+            main.removeCallbacks(repeat)
+            main.postDelayed(repeat, REPEAT_MS)
+        }
+    }
+
+    // 카카오·네이버는 값이 바뀔 때만 보낸다 → 신호 대기 등에서 수십 초 무전송이면 HUD 안내가 끊겨 보임
+    // (실차 0.1.8, 연결·HUD 응답은 정상). TMAP RGData처럼 마지막 안내를 2초마다 다시 보냄 (기록은 안 남김)
+    private val repeat: Runnable = Runnable {
+        val t = lastTbt
+        if (ready && t != null) {
+            send(KivicPacket.tbt(t))
+            main.postDelayed(repeat, REPEAT_MS)
         }
     }
 
@@ -92,6 +104,7 @@ class KivicLink(
         ready = false
         main.removeCallbacks(retry)
         main.removeCallbacks(watchdog)
+        main.removeCallbacks(repeat)
         main.removeCallbacks(forceMode)
         main.removeCallbacks(stopScan)
         scanner?.stopScan(scanCb)
@@ -265,6 +278,7 @@ class KivicLink(
     companion object {
         private const val RETRY_MS = 5_000L
         private const val ALIVE_TIMEOUT_MS = 12_000L // 원본 앱과 같은 값
+        private const val REPEAT_MS = 2_000L
         private val NUS: UUID = UUID.fromString("6e400001-b5a3-f393-e0a9-e50e24dcca9e")
         private val NUS_RX: UUID = UUID.fromString("6e400002-b5a3-f393-e0a9-e50e24dcca9e")
         private val NUS_TX: UUID = UUID.fromString("6e400003-b5a3-f393-e0a9-e50e24dcca9e")
