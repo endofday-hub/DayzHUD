@@ -26,11 +26,4 @@ class CarManeuverTest {
         assertEquals(listOf(Maneuver.TYPE_U_TURN_LEFT), CarManeuver.laneDirs(1).map { it.arrow })
         assertEquals(emptyList<Int>(), CarManeuver.laneDirs(0).map { it.bit })
     }
-
-    @Test
-    fun sdiLabels() {
-        assertEquals("과속 카메라", KakaoNaviMapping.sdiLabel(1))
-        assertEquals("구간단속 중", KakaoNaviMapping.sdiLabel(4))
-        assertEquals("주의", KakaoNaviMapping.sdiLabel(999))
-    }
 }

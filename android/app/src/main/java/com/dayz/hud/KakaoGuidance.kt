@@ -127,6 +127,9 @@ object KakaoGuidance :
 
     private var guidance: KNGuidance? = null
     private var destination = ""
+    var destAddress = "" // 차량 화면 내 차 아래 글용
+        private set
+    private var lastLaneColor: String? = null
     private var lastTo: Place? = null // 재탐색용
     private var lastSimul = false
     private var lastSent: Tbt? = null
@@ -251,7 +254,7 @@ object KakaoGuidance :
         avoid = c.avoid
         preview = null
         log("카카오 경로 선택: ${c.label}")
-        begin(c.trip, c.to.name, simul)
+        begin(c.trip, c.to, simul)
     }
 
     // 현재 위치 → (via 거쳐) to 경로 탐색 후 안내 시작 (지금 고른 경로 종류로). view가 있으면 그 화면에 붙인다
@@ -273,16 +276,17 @@ object KakaoGuidance :
             trip.routeWithPriority(priority, avoid) { err2, _ ->
                 main.post {
                     if (err2 != null) return@post done(fail("경로 탐색", err2))
-                    begin(trip, to.name, simul)
+                    begin(trip, to, simul)
                     done(null)
                 }
             }
         }
     }
 
-    private fun begin(trip: KNTrip, name: String, simul: Boolean) {
+    private fun begin(trip: KNTrip, to: Place, simul: Boolean) {
         val g = attach(simul) ?: return
-        destination = name
+        destination = to.name
+        destAddress = to.address
         val v = view
         if (v != null) v.initWithGuidance(g, trip, priority, avoid) else g.startWithTrip(trip, priority, avoid)
         log("카카오 안내 시작${if (simul) " (모의주행)" else ""}")
@@ -297,6 +301,7 @@ object KakaoGuidance :
         safeMode = true
         safeLogged = false
         destination = "안전운행"
+        destAddress = ""
         val v = view
         if (v != null) {
             v.trafficMode = true
@@ -435,7 +440,10 @@ object KakaoGuidance :
             },
             laneDistance = lane?.let { dist(it.location) } ?: 0,
             section = section,
+            laneColor = KakaoNaviMapping.laneColor(dir?.laneColor?.name),
         )
+        if (guide.laneColor != lastLaneColor) guide.laneColor?.let { log("카카오 유도선: $it → ${guide.name}") }
+        lastLaneColor = guide.laneColor
         val tbt = if (safeMode) KakaoNaviMapping.safeTbt(guide) else KakaoNaviMapping.toTbt(guide)
         send(tbt)
         val event = g.routeGuide?.roadEvents.orEmpty()

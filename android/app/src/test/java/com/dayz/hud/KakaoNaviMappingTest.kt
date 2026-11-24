@@ -91,6 +91,25 @@ class KakaoNaviMappingTest {
     }
 
     @Test
+    fun labelCyclesAddressDestNameDestAddress() {
+        val items = listOf("서울시 강서구 발산제1동", "예성라온팰리스오피스텔", "서울 구로구 경인로 240")
+        assertEquals(listOf(0, 1, 2, 0), (0L..3L).map { KakaoNaviMapping.labelTurn(items, it) })
+        // 주소를 아직 몰라도·목적지 주소가 이름과 같아도 건너뜀
+        assertEquals(listOf(1, 1), (0L..1L).map { KakaoNaviMapping.labelTurn(listOf(null, "정읍시 부전동 1019-1", "정읍시 부전동 1019-1"), it) })
+        assertEquals(null, KakaoNaviMapping.labelTurn(listOf(null, "", " "), 0))
+    }
+
+    @Test
+    fun laneColorGoesInFrontOfTurnName() {
+        assertEquals("분홍색", KakaoNaviMapping.laneColor("KNRGLaneColor_Pink"))
+        assertEquals("초록색", KakaoNaviMapping.laneColor("KNRGLaneColor_Green"))
+        assertEquals(null, KakaoNaviMapping.laneColor("KNRGLaneColor_None"))
+        assertEquals("분홍색 유도선 · 서서울IC", KakaoNaviMapping.turnName("서서울IC", "분홍색"))
+        assertEquals("초록색 유도선", KakaoNaviMapping.turnName("", "초록색"))
+        assertEquals("서서울IC", KakaoNaviMapping.turnName("서서울IC", null))
+    }
+
+    @Test
     fun safeDriveKeepsOnlySpeedAndCamera() {
         val t = KakaoNaviMapping.safeTbt(KakaoNaviMapping.Guide(
             rg = 0, turnDistance = 0, name = "", remainDistance = 0, remainSeconds = 0, speed = 72,

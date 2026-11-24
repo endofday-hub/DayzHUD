@@ -350,12 +350,18 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
             canvas.rotate(r)
             canvas.drawBitmap(carBmp, -CAR_SIZE / 2f, -CAR_SIZE / 2f, carPaint)
             canvas.restore()
-            // 내 차 바로 아래: 현위치 주소 ↔ 목적지 번갈아
-            placeLabel()?.let { b -> canvas.drawBitmap(b, x - b.width / 2f, y + CAR_SIZE / 2f + 6f, carPaint) }
+            // 내 차 바로 아래: 현위치 주소 → 목적지 이름 → 목적지 주소 번갈아.
+            // 아래에 자리가 없으면 (화면 분할 때 아래 시간 카드) 내 차 위에
+            placeLabel()?.let { b ->
+                val bottom = (visible ?: Rect(0, 0, surfaceSize.first, surfaceSize.second)).bottom
+                val below = y + CAR_SIZE / 2f + 6f
+                val top = if (below + b.height <= bottom) below else y - CAR_SIZE / 2f - 6f - b.height
+                canvas.drawBitmap(b, x - b.width / 2f, top, carPaint)
+            }
         }
         val bar = trafficBar
         if (bar != null) drawTrafficBar(canvas, bar)
-        val barSpace = if (bar != null) BAR_W + PANEL_MARGIN else 0f
+        val barSpace = if (bar != null) BAR_DOT + BAR_W / 2 + PANEL_MARGIN else 0f // 막대 + 동그라미만큼 안쪽 여백
         panelOverlay?.let { b ->
             // 보이는 영역(카드·버튼에 안 가리는 지도)의 오른쪽 위. 왼쪽 아래는 실차에서 시간 카드·내 차와 겹쳤음
             // 좁거나 낮은 화면이면 줄이기만 함: 폭은 오른쪽 절반, 높이는 내 차(3/4 지점)에 안 닿게 60%까지
@@ -394,9 +400,14 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
         if (scaleFactor > 0f) frames.post { zoomBy(1 / scaleFactor) }
     }
 
+    // 위쪽 버튼(옵션·재탐색·안내 종료)과 지도 버튼이 나왔다 숨으면 보이는 영역의 위·오른쪽만 줄었다 늘었다 함
+    // → 정보판·교통량 막대·내 차가 따라 움직이지 않게 넓은 쪽을 유지 (버튼은 그 위에 겹쳐 보임).
+    // 왼쪽·아래가 바뀌면 (화면 바뀜·화면 분할) 새 영역으로
     override fun onVisibleAreaChanged(r: Rect) {
-        if (r != visible) HudService.log("차량 화면 보이는 영역 $r")
-        visible = r
+        val v = visible
+        val next = if (v != null && v.left == r.left && v.bottom == r.bottom) Rect(r).apply { union(v) } else r
+        if (next != v) HudService.log("차량 화면 보이는 영역 $next (받은 값 $r)")
+        visible = next
     }
 
     // 내 차를 카드에 안 가리는 영역의 가운데·아래쪽 3/4 지점에 (화면 비율 0~1, SDK 화면도 같은 방식)
@@ -606,7 +617,8 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
     private var trafficAt = 0L
     private var trafficRoute: KNRoute? = null
     private var overlayKey = ""
-    private val BAR_W = 14f
+    private val BAR_W = 8f
+    private val BAR_DOT = 11f // 아래 끝 내 자리 동그라미 반지름
     private val TRAFFIC_N = 60
 
     private fun updateTraffic(loc: KNLocation?, remain: Int) {
@@ -631,10 +643,10 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
 
     private fun drawTrafficBar(c: Canvas, runs: List<Pair<Float, Int>>) {
         val v = visible ?: Rect(0, 0, surfaceSize.first, surfaceSize.second)
-        val right = v.right - PANEL_MARGIN
+        val right = v.right - PANEL_MARGIN - (BAR_DOT - BAR_W / 2) // 동그라미가 막대보다 넓음 → 그만큼 안쪽
         val left = right - BAR_W
         val top = v.top + PANEL_MARGIN
-        val bottom = v.bottom - PANEL_MARGIN - BAR_W // 아래 내 자리 동그라미 자리
+        val bottom = v.bottom - PANEL_MARGIN - BAR_DOT // 아래 내 자리 동그라미 자리
         val len = bottom - top
         if (len <= 0f) return
         val p = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -648,8 +660,8 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
         // 위 끝 = 목적지 (흰 막대), 아래 끝 = 내 자리 (내 차 아이콘과 같은 흰 원·앰버 테두리)
         c.drawRect(left - 3f, top - 3f, right + 3f, top + 3f, p.apply { color = Color.WHITE })
         val cx = (left + right) / 2
-        c.drawCircle(cx, bottom, BAR_W * 0.9f, p.apply { color = Color.WHITE })
-        c.drawCircle(cx, bottom, BAR_W * 0.9f, p.apply { color = MainActivity.ACCENT; style = Paint.Style.STROKE; strokeWidth = 4f })
+        c.drawCircle(cx, bottom, BAR_DOT, p.apply { color = Color.WHITE })
+        c.drawCircle(cx, bottom, BAR_DOT, p.apply { color = MainActivity.ACCENT; style = Paint.Style.STROKE; strokeWidth = 4f })
     }
 
     // ── 내 차 아래 글: 현위치 주소 ↔ 목적지 (안내 중일 때만 번갈아, 4초씩) ──
@@ -678,19 +690,19 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
         }.onFailure { if (!addrLogged) HudService.log("현위치 주소 실패: $it").also { addrLogged = true } }
     }
 
-    // 지금 보일 글과 앞 점 색 (목적지 빨강, 현위치 앰버). 안내 없으면 주소만
+    // 지금 보일 글과 앞 점 색 (현위치 앰버, 목적지 이름·주소 빨강). 안내 없으면 주소만
     private fun labelText(): Pair<String, Int>? {
         val s = KakaoGuidance.state
-        val dest = s?.destination?.takeIf { s.routes != null && it.isNotBlank() }
-        val addr = address
-        val showDest = dest != null && (addr == null || SystemClock.uptimeMillis() / LABEL_MS % 2 == 1L)
-        return if (showDest) "목적지 $dest" to 0xFFE53935.toInt() else addr?.let { it to MainActivity.ACCENT }
+        val guiding = s != null && s.routes != null
+        val items = listOf(address, s?.destination?.takeIf { guiding }, KakaoGuidance.destAddress.takeIf { guiding })
+        val i = KakaoNaviMapping.labelTurn(items, SystemClock.uptimeMillis() / LABEL_MS) ?: return null
+        return items[i]!! to if (i == 0) MainActivity.ACCENT else 0xFFE53935.toInt()
     }
 
     private fun placeLabel(): Bitmap? {
         val (text, dot) = labelText() ?: return null
         labelCache?.takeIf { it.first == text }?.let { return it.second }
-        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 22f; isFakeBoldText = true; color = Color.WHITE }
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 22f; color = Color.WHITE }
         val t = fit(text, p, 360f)
         val w = (p.measureText(t) + 52f).toInt()
         val h = 40
@@ -732,7 +744,7 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
         val limit = t?.safeSpeedLimit ?: 0
         val lines = buildList {
             // 구간단속 중이면 "구간 단속중"이 대신하므로 "구간단속 중 n km" 줄은 뺌
-            if (t != null && !(t.block && t.safeCode == 4)) add("${KakaoNaviMapping.sdiLabel(t.safeCode)} ${meters(t.safeDistance)}" to 0xFFFFC107.toInt())
+            if (t != null && !(t.block && t.safeCode == 4)) add(meters(t.safeDistance) to 0xFFFFC107.toInt())
             if (t != null && t.block) {
                 add("구간 단속중 · 남은 ${meters(t.blockDistance)}" to 0xFFFFC107.toInt())
                 // 평균이 제한속도를 넘으면 빨강
@@ -868,7 +880,7 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
     // [브랜드 글자 | 가격] 둥근 표지 + 아래 꼭지 (꼭지 끝 = 주유소 자리)
     private fun stationBadge(st: Opinet.Station): Bitmap {
         val (label, color) = Opinet.badge(st.brand)
-        val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 22f; isFakeBoldText = true; this.color = Color.WHITE }
+        val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 22f; this.color = Color.WHITE }
         val price = "%,d".format(st.price)
         val lw = txt.measureText(label) + 16f
         val w = (lw + txt.measureText(price) + 16f).toInt()
@@ -1061,12 +1073,12 @@ object CarPath {
 
     // KNTrafficState 이름 → 교통량 막대 색. 원활은 초록(SDK 이름은 Blue), 정보 없으면 회색
     fun trafficColor(state: String): Int = when (state.removePrefix("KNTrafficState_")) {
-        "Blue" -> 0xFF43A047.toInt()
-        "Yellow" -> 0xFFFDD835.toInt()
-        "Orange" -> 0xFFFB8C00.toInt()
-        "Red" -> 0xFFE53935.toInt()
-        "Blocked" -> 0xFF7B1010.toInt()
-        else -> 0xFF7A8290.toInt()
+        "Blue" -> 0xFF69F0AE.toInt()
+        "Yellow" -> 0xFFFFF176.toInt()
+        "Orange" -> 0xFFFFB74D.toInt()
+        "Red" -> 0xFFFF6E6E.toInt()
+        "Blocked" -> 0xFFD32F2F.toInt()
+        else -> 0xFFB0B8C4.toInt()
     }
 
     // 남은 경로를 같은 간격으로 짚은 교통 상태(가까운 곳부터) → (끝 비율 0~1, 색) 칸. 같은 색이 이어지면 한 칸
