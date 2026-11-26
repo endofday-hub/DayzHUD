@@ -350,12 +350,10 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
             canvas.rotate(r)
             canvas.drawBitmap(carBmp, -CAR_SIZE / 2f, -CAR_SIZE / 2f, carPaint)
             canvas.restore()
-            // 내 차 바로 아래: 현위치 주소 → 목적지 이름 → 목적지 주소 번갈아.
-            // 아래에 자리가 없으면 (화면 분할 때 아래 시간 카드) 내 차 위에
+            // 내 차 바로 아래: 현위치 주소 → 목적지 이름 → 목적지 주소 번갈아 (화면 분할엔 글 없음).
+            // 늘 아래에 (위로 올리면 위쪽 버튼이 보이는 동안 정보판을 가림 — 0.1.10 실차). 화면 끝을 넘으면 그만큼만 올림
             placeLabel()?.let { b ->
-                val bottom = (visible ?: Rect(0, 0, surfaceSize.first, surfaceSize.second)).bottom
-                val below = y + CAR_SIZE / 2f + 6f
-                val top = if (below + b.height <= bottom) below else y - CAR_SIZE / 2f - 6f - b.height
+                val top = minOf(y + CAR_SIZE / 2f + 6f, surfaceSize.second - b.height - 2f)
                 canvas.drawBitmap(b, x - b.width / 2f, top, carPaint)
             }
         }
@@ -408,6 +406,9 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
         val next = if (v != null && v.left == r.left && v.bottom == r.bottom) Rect(r).apply { union(v) } else r
         if (next != v) HudService.log("차량 화면 보이는 영역 $next (받은 값 $r)")
         visible = next
+        // 정차 중(settled)이면 지도 카메라가 옛 자리에 남아 내 차 아이콘과 어긋남 → 다음 프레임에 새 자리로.
+        // 경로 선택 중이면 경로 전체 맞춤을 새 영역으로 다시
+        if (next != v) frames.post { if (previewAt != null) { shownRoutes = null; follow() } else settled = false }
     }
 
     // 내 차를 카드에 안 가리는 영역의 가운데·아래쪽 3/4 지점에 (화면 비율 0~1, SDK 화면도 같은 방식)
