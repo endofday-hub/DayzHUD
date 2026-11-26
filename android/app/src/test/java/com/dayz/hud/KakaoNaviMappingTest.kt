@@ -100,11 +100,14 @@ class KakaoNaviMappingTest {
     }
 
     @Test
-    fun laneColorOnlyNearTurn() {
-        assertEquals(0xFFFF5CA8.toInt(), KakaoNaviMapping.laneColor("KNRGLaneColor_Pink", 500))
-        assertEquals(0xFF2ECC71.toInt(), KakaoNaviMapping.laneColor("KNRGLaneColor_Green", 120))
-        assertEquals(null, KakaoNaviMapping.laneColor("KNRGLaneColor_Pink", 4_052)) // 실차: 4km 앞부터 옴
-        assertEquals(null, KakaoNaviMapping.laneColor("KNRGLaneColor_None", 100))
+    fun laneColorPerLaneOnlyNear() {
+        // 실차 0.1.10: 좌회전 / 직진 4 (안내) / 우회전, 분홍 유도선은 직진 앞 두 차로만
+        val pink = 0xFFFF5CA8.toInt()
+        val lanes = listOf(-1, 0, 0, -1, -1, -1).map { KakaoNaviMapping.Lane(turn = 8, color = it) }
+        assertEquals(listOf(null, pink, pink, null, null, null), KakaoNaviMapping.laneColors(lanes, 250))
+        assertEquals(listOf(0xFF2ECC71.toInt()), KakaoNaviMapping.laneColors(listOf(KakaoNaviMapping.Lane(turn = 8, color = 2)), 500))
+        assertEquals(null, KakaoNaviMapping.laneColors(lanes, 4_052)) // 멀면 없음
+        assertEquals(null, KakaoNaviMapping.laneColors(lanes.map { KakaoNaviMapping.Lane(turn = 8) }, 100)) // 색 있는 차로 없음
     }
 
     @Test

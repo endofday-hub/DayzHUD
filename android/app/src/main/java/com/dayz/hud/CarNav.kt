@@ -153,7 +153,7 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
                 KakaoGuidance.reroute { e -> if (e != null) CarToast.makeText(carContext, e, CarToast.LENGTH_LONG).show() }
             }.build())
             .addAction(Action.Builder().setTitle("안내 종료").setOnClickListener { KakaoGuidance.stop() }.build())
-        val info = RoutingInfo.Builder().setCurrentStep(step(s.rg, s.tbt.turnName, s.tbt, s.laneColor), distance(s.tbt.turnDistance))
+        val info = RoutingInfo.Builder().setCurrentStep(step(s.rg, s.tbt.turnName, s.tbt, s.laneColors), distance(s.tbt.turnDistance))
         s.nextRg?.let { info.setNextStep(step(it, "")) }
         return NavigationTemplate.Builder().setActionStrip(strip.build())
             .setMapActionStrip(mapButtons()).setPanModeListener { }
@@ -234,15 +234,15 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
         val stepSec = if (t.totalDistance > 0) t.totalTime * t.turnDistance / t.totalDistance else 0L
         nav.updateTrip(
             Trip.Builder()
-                .addStep(step(s.rg, t.turnName, t, s.laneColor), estimate(t.turnDistance, stepSec))
+                .addStep(step(s.rg, t.turnName, t, s.laneColors), estimate(t.turnDistance, stepSec))
                 .addDestination(Destination.Builder().setName(s.destination).build(), estimate(t))
                 .setCurrentRoad(s.tbt.turnName)
                 .build(),
         )
     }
 
-    // lanes = 차로 정보가 있으면 회전 카드 아래(와 계기판)에 차로 그림. laneColor = 노면 유도선 색 (안내 화살표를 그 색으로)
-    private fun step(rg: Int, cue: String, lanes: Tbt? = null, laneColor: Int? = null): Step {
+    // lanes = 차로 정보가 있으면 회전 카드 아래(와 계기판)에 차로 그림. laneColors = 차로마다 노면 유도선 색 (그 차로 안내 화살표를 그 색으로)
+    private fun step(rg: Int, cue: String, lanes: Tbt? = null, laneColors: List<Int?>? = null): Step {
         val (type, angle) = CarManeuver.of(rg)
         val m = Maneuver.Builder(type).setIcon(CarIcon.Builder(IconCompat.createWithBitmap(arrowBitmap(type, angle))).build())
         if (angle != null) m.setRoundaboutExitAngle(angle)
@@ -256,13 +256,13 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
                 for (d in dirs) lane.addDirection(LaneDirection.create(d.shape, ok and d.bit != 0))
                 b.addLane(lane.build())
             }
-            b.setLanesImage(CarIcon.Builder(IconCompat.createWithBitmap(lanesBitmap(lanes, laneColor))).build())
+            b.setLanesImage(CarIcon.Builder(IconCompat.createWithBitmap(lanesBitmap(lanes, laneColors))).build())
         }
         return b.build()
     }
 
-    // 차로 그림: 차로마다 칸 하나, 갈 수 있는 방향 화살표를 겹쳐 그림. 안내 차로의 안내 방향은 흰색(유도선이 있으면 그 색), 나머지 회색
-    private fun lanesBitmap(t: Tbt, laneColor: Int?): Bitmap {
+    // 차로 그림: 차로마다 칸 하나, 갈 수 있는 방향 화살표를 겹쳐 그림. 안내 차로의 안내 방향은 흰색(그 차로에 유도선이 있으면 그 색), 나머지 회색
+    private fun lanesBitmap(t: Tbt, laneColors: List<Int?>?): Bitmap {
         val cell = 64
         return Bitmap.createBitmap(cell * t.laneTurnInfo.size, cell, Bitmap.Config.ARGB_8888).also {
             val c = Canvas(it)
@@ -272,7 +272,7 @@ class NavScreen(ctx: CarContext) : Screen(ctx), SurfaceCallback {
                 val r = RectF(i * cell + 10f, 8f, (i + 1) * cell - 10f, cell - 4f)
                 // 회색 먼저, 흰색을 위에
                 for (white in listOf(false, true)) for (d in CarManeuver.laneDirs(bits)) {
-                    if ((ok and d.bit != 0) == white) drawArrow(c, r, d.arrow, null, if (white) laneColor ?: Color.WHITE else 0xFF6E7380.toInt())
+                    if ((ok and d.bit != 0) == white) drawArrow(c, r, d.arrow, null, if (white) laneColors?.getOrNull(i) ?: Color.WHITE else 0xFF6E7380.toInt())
                 }
                 if (i > 0) c.drawLine(i * cell.toFloat(), 6f, i * cell.toFloat(), cell - 6f, sep)
             }

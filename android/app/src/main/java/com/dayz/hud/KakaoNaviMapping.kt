@@ -73,17 +73,13 @@ object KakaoNaviMapping {
         return if (shown.isEmpty()) null else shown[(tick % shown.size).toInt()]
     }
 
-    // 노면 색깔 유도선 (KNRGLaneColor 이름) → 차량 화면 차로 그림의 안내 화살표 색. 없으면 null.
-    // SDK는 회전 지점 수 km 앞부터 주므로 (실차 4km) 이 거리 안에서만
+    // 노면 색깔 유도선: 차로마다 (KNLane_LaneInfo.colorType) → 그 차로의 안내 화살표 색. 유도선 깔린 차로만 (실차: 직진 4차로 중 1·2차로만 분홍).
+    // 회전 하나에 붙은 색(KNDirection.laneColor)은 수 km 앞부터 오므로 (실차 4km) 차로 지점 이 거리 안에서만. 색 있는 차로가 없으면 null
     const val LANE_COLOR_RANGE = 500
+    private val LANE_COLORS = listOf(0xFFFF5CA8.toInt(), 0xFFA5E05A.toInt(), 0xFF2ECC71.toInt(), 0xFF4FC3F7.toInt()) // 분홍, 연두, 초록, 하늘
 
-    fun laneColor(name: String?, distance: Int): Int? = if (distance > LANE_COLOR_RANGE) null else when (name?.removePrefix("KNRGLaneColor_")) {
-        "Pink" -> 0xFFFF5CA8.toInt()
-        "LightGreen" -> 0xFFA5E05A.toInt()
-        "Green" -> 0xFF2ECC71.toInt()
-        "SkyBlue" -> 0xFF4FC3F7.toInt()
-        else -> null
-    }
+    fun laneColors(lanes: List<Lane>, distance: Int): List<Int?>? =
+        if (distance > LANE_COLOR_RANGE) null else lanes.map { LANE_COLORS.getOrNull(it.color) }.takeIf { c -> c.any { it != null } }
 
     // 이 거리 안의 안전 정보만 HUD에 (TMAP showSDI와 비슷하게)
     private const val SDI_RANGE = 1_000
@@ -103,6 +99,7 @@ object KakaoNaviMapping {
         val facility: Int = 0,  // 1 고가, 2 지하
         val highlight: Int = 0, // 안내 차로면 0 아님
         val suggest: Int = 0,   // 1 권장 차로
+        val color: Int = -1,    // 노면 유도선 색 (SDK 차로 그림과 같게): -1 없음, 0 분홍, 1 연두, 2 초록, 3 하늘
     )
 
     class Guide(
