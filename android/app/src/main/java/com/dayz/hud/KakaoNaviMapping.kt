@@ -73,18 +73,17 @@ object KakaoNaviMapping {
         return if (shown.isEmpty()) null else shown[(tick % shown.size).toInt()]
     }
 
-    // 노면 색깔 유도선 (KNRGLaneColor 이름) → "분홍색" 등. 없으면 null
-    fun laneColor(name: String?): String? = when (name?.removePrefix("KNRGLaneColor_")) {
-        "Pink" -> "분홍색"
-        "LightGreen" -> "연두색"
-        "Green" -> "초록색"
-        "SkyBlue" -> "하늘색"
+    // 노면 색깔 유도선 (KNRGLaneColor 이름) → 차량 화면 차로 그림의 안내 화살표 색. 없으면 null.
+    // SDK는 회전 지점 수 km 앞부터 주므로 (실차 4km) 이 거리 안에서만
+    const val LANE_COLOR_RANGE = 500
+
+    fun laneColor(name: String?, distance: Int): Int? = if (distance > LANE_COLOR_RANGE) null else when (name?.removePrefix("KNRGLaneColor_")) {
+        "Pink" -> 0xFFFF5CA8.toInt()
+        "LightGreen" -> 0xFFA5E05A.toInt()
+        "Green" -> 0xFF2ECC71.toInt()
+        "SkyBlue" -> 0xFF4FC3F7.toInt()
         else -> null
     }
-
-    // 회전 안내 글: 유도선이 있으면 앞에 (HUD·차량 회전 카드에서 잘려도 색은 보이게)
-    fun turnName(name: String, laneColor: String?): String =
-        if (laneColor == null) name else listOf("$laneColor 유도선", name).filter { it.isNotBlank() }.joinToString(" · ")
 
     // 이 거리 안의 안전 정보만 HUD에 (TMAP showSDI와 비슷하게)
     private const val SDI_RANGE = 1_000
@@ -119,7 +118,6 @@ object KakaoNaviMapping {
         val lanes: List<Lane> = emptyList(),
         val laneDistance: Int = 0,
         val section: Section? = null,
-        val laneColor: String? = null, // 노면 유도선 색 ("분홍색" 등)
     )
 
     // TMAP laneEtcInfo: 1 좌포켓, 2 우포켓, 4 고가, 8 지하, 64 버스, 0x80 권장
@@ -139,7 +137,7 @@ object KakaoNaviMapping {
             totalTime = g.remainSeconds.toLong(), // TMAP과 같은 초 단위
             turnDistance = g.turnDistance,
             turnCode = turnCode(g.rg),
-            turnName = turnName(g.name, g.laneColor),
+            turnName = g.name,
             nextTurnDistance = if (g.nextRg != null) g.nextDistance else 0,
             nextTurnCode = g.nextRg?.let(::turnCode) ?: 0,
             safe = code != null,

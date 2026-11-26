@@ -100,13 +100,11 @@ class KakaoNaviMappingTest {
     }
 
     @Test
-    fun laneColorGoesInFrontOfTurnName() {
-        assertEquals("분홍색", KakaoNaviMapping.laneColor("KNRGLaneColor_Pink"))
-        assertEquals("초록색", KakaoNaviMapping.laneColor("KNRGLaneColor_Green"))
-        assertEquals(null, KakaoNaviMapping.laneColor("KNRGLaneColor_None"))
-        assertEquals("분홍색 유도선 · 서서울IC", KakaoNaviMapping.turnName("서서울IC", "분홍색"))
-        assertEquals("초록색 유도선", KakaoNaviMapping.turnName("", "초록색"))
-        assertEquals("서서울IC", KakaoNaviMapping.turnName("서서울IC", null))
+    fun laneColorOnlyNearTurn() {
+        assertEquals(0xFFFF5CA8.toInt(), KakaoNaviMapping.laneColor("KNRGLaneColor_Pink", 500))
+        assertEquals(0xFF2ECC71.toInt(), KakaoNaviMapping.laneColor("KNRGLaneColor_Green", 120))
+        assertEquals(null, KakaoNaviMapping.laneColor("KNRGLaneColor_Pink", 4_052)) // 실차: 4km 앞부터 옴
+        assertEquals(null, KakaoNaviMapping.laneColor("KNRGLaneColor_None", 100))
     }
 
     @Test

@@ -57,6 +57,7 @@ object KakaoGuidance :
         val tbt: Tbt, val rg: Int, val nextRg: Int?, val destination: String,
         val pos: FloatPoint, val angle: Float, val location: KNLocation?, val routes: List<KNRoute>?,
         val event: RoadEvent?, val highway: List<Highway>,
+        val laneColor: Int? = null, // 회전 지점 가까이의 노면 유도선 색 (차로 그림 안내 화살표)
     )
 
     class RoadEvent(val title: String, val distance: Int, val icon: Bitmap?)
@@ -129,7 +130,7 @@ object KakaoGuidance :
     private var destination = ""
     var destAddress = "" // 차량 화면 내 차 아래 글용
         private set
-    private var lastLaneColor: String? = null
+    private var lastLaneColor: Int? = null
     private var lastTo: Place? = null // 재탐색용
     private var lastSimul = false
     private var lastSent: Tbt? = null
@@ -440,10 +441,10 @@ object KakaoGuidance :
             },
             laneDistance = lane?.let { dist(it.location) } ?: 0,
             section = section,
-            laneColor = KakaoNaviMapping.laneColor(dir?.laneColor?.name),
         )
-        if (guide.laneColor != lastLaneColor) guide.laneColor?.let { log("카카오 유도선: $it → ${guide.name}") }
-        lastLaneColor = guide.laneColor
+        val laneColor = if (safeMode) null else KakaoNaviMapping.laneColor(dir?.laneColor?.name, guide.turnDistance)
+        if (laneColor != lastLaneColor && laneColor != null) log("카카오 유도선: ${dir?.laneColor?.name} ${guide.turnDistance}m → ${guide.name}")
+        lastLaneColor = laneColor
         val tbt = if (safeMode) KakaoNaviMapping.safeTbt(guide) else KakaoNaviMapping.toTbt(guide)
         send(tbt)
         val event = g.routeGuide?.roadEvents.orEmpty()
@@ -461,7 +462,7 @@ object KakaoGuidance :
         val at = here?.pos?.let { FloatPoint(it.x.toFloat(), it.y.toFloat()) } ?: FloatPoint(gps.pos.x.toFloat(), gps.pos.y.toFloat())
         state = State(
             tbt, guide.rg, next?.rgCode?.value, destination,
-            at, gps.angle.toFloat(), here, if (safeMode) null else g.routesOnGuide, event, highway,
+            at, gps.angle.toFloat(), here, if (safeMode) null else g.routesOnGuide, event, highway, laneColor,
         )
         listeners.forEach { it() }
     }
